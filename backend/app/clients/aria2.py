@@ -34,11 +34,23 @@ class Aria2Client:
             raise RuntimeError(f"Aria2 error: {err}")
         return data
 
-    async def add_uri(self, uri: str, directory: str, filename: str = "") -> str:
-        """Add a download to Aria2 and return the GID."""
+    async def add_uri(
+        self, uri: str, directory: str, filename: str = "",
+        single_connection: bool = False,
+    ) -> str:
+        """Add a download to Aria2 and return the GID.
+
+        Args:
+            single_connection: If True, disable segmented downloading.
+                Use for servers that don't support Range requests (e.g. FastShare).
+        """
         options: dict[str, str] = {"dir": directory}
         if filename:
             options["out"] = filename
+        if single_connection:
+            options["split"] = "1"
+            options["max-connection-per-server"] = "1"
+            options["min-split-size"] = "1G"
         data = await self._rpc("aria2.addUri", [[uri], options])
         return data["result"]
 

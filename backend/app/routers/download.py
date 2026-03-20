@@ -22,7 +22,13 @@ async def start_download(req: DownloadRequest) -> dict:
         download_info = await source.get_download_info(req.file_ident)
         aria2 = Aria2Client(cfg["aria2_rpc_url"], cfg["aria2_rpc_secret"])
         try:
-            gid = await aria2.add_uri(download_info["url"], directory=target_dir)
+            # DDL servers (FastShare, WebShare) don't support Range requests
+            # so we must download in a single connection to avoid errors
+            gid = await aria2.add_uri(
+                download_info["url"],
+                directory=target_dir,
+                single_connection=True,
+            )
             return {
                 "gid": gid,
                 "status": "active",
