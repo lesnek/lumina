@@ -28,12 +28,20 @@ export default function RootLayout({
               <Image src="/favicon.svg" alt="" width={24} height={24} />
               Lumina
             </Link>
-            <Link
-              href="/settings"
-              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Nastavení
-            </Link>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/discover"
+                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Objevit
+              </Link>
+              <Link
+                href="/settings"
+                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Nastaveni
+              </Link>
+            </div>
           </div>
         </nav>
         {children}

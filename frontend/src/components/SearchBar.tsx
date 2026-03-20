@@ -7,10 +7,11 @@ import LanguageSelect from "./LanguageSelect";
 interface Props {
   onSearch: (query: string, language?: string) => void;
   loading: boolean;
+  initialQuery?: string;
 }
 
-export default function SearchBar({ onSearch, loading }: Props) {
-  const [query, setQuery] = useState("");
+export default function SearchBar({ onSearch, loading, initialQuery }: Props) {
+  const [query, setQuery] = useState(initialQuery || "");
   const [languages, setLanguages] = useState<LanguageOption[]>([]);
   const [selectedLangs, setSelectedLangs] = useState<string[]>([]);
 
@@ -36,6 +37,10 @@ export default function SearchBar({ onSearch, loading }: Props) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (initialQuery) setQuery(initialQuery);
+  }, [initialQuery]);
 
   const enabledLangs = languages.filter((l) => l.enabled);
 

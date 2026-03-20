@@ -22,10 +22,11 @@ class TMDBClient:
             },
         )
         resp.raise_for_status()
-        data = resp.json()
+        return await self._parse_movies(resp.json().get("results", []), limit=12)
 
+    async def _parse_movies(self, items: list, limit: int = 20) -> list[TMDBMovie]:
         movies: list[TMDBMovie] = []
-        for item in data.get("results", [])[:12]:
+        for item in items[:limit]:
             release = item.get("release_date", "") or ""
             poster_path = item.get("poster_path")
             movies.append(
@@ -39,6 +40,30 @@ class TMDBClient:
                 )
             )
         return movies
+
+    async def trending(self, language: str = "cs-CZ", time_window: str = "week") -> list[TMDBMovie]:
+        resp = await self._http.get(
+            f"{API_BASE}/trending/movie/{time_window}",
+            params={"api_key": self._api_key, "language": language},
+        )
+        resp.raise_for_status()
+        return await self._parse_movies(resp.json().get("results", []))
+
+    async def now_playing(self, language: str = "cs-CZ") -> list[TMDBMovie]:
+        resp = await self._http.get(
+            f"{API_BASE}/movie/now_playing",
+            params={"api_key": self._api_key, "language": language, "region": "CZ"},
+        )
+        resp.raise_for_status()
+        return await self._parse_movies(resp.json().get("results", []))
+
+    async def popular(self, language: str = "cs-CZ") -> list[TMDBMovie]:
+        resp = await self._http.get(
+            f"{API_BASE}/movie/popular",
+            params={"api_key": self._api_key, "language": language, "region": "CZ"},
+        )
+        resp.raise_for_status()
+        return await self._parse_movies(resp.json().get("results", []))
 
     async def close(self) -> None:
         await self._http.aclose()

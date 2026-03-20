@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import SearchBar from "@/components/SearchBar";
 import MovieGrid from "@/components/MovieGrid";
 import FileTable from "@/components/FileTable";
@@ -16,6 +16,7 @@ import {
 
 export default function Home() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [ready, setReady] = useState(false);
   const [movies, setMovies] = useState<TMDBMovie[]>([]);
   const [files, setFiles] = useState<ScoredFile[]>([]);
@@ -38,6 +39,36 @@ export default function Home() {
   }, [router]);
 
   const [searchLang, setSearchLang] = useState<string | undefined>(undefined);
+  const [initialQuery, setInitialQuery] = useState("");
+
+  // Auto-search when coming from Discover page with ?q= param
+  const handleSearchCb = useCallback(async (query: string, language?: string) => {
+    setError(null);
+    setMovies([]);
+    setFiles([]);
+    setSelectedMovie(null);
+    setResultsCollapsed(false);
+    setMoviesLoading(true);
+    setSearchLang(language);
+    try {
+      const results = await searchMovies(query, language);
+      setMovies(results);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Search error");
+    } finally {
+      setMoviesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q && ready) {
+      setInitialQuery(q);
+      handleSearchCb(q);
+      // Clean URL
+      window.history.replaceState({}, "", "/");
+    }
+  }, [searchParams, ready, handleSearchCb]);
 
   async function handleSearch(query: string, language?: string) {
     setError(null);
@@ -95,7 +126,7 @@ export default function Home() {
         </p>
       </div>
 
-      <SearchBar onSearch={handleSearch} loading={moviesLoading} />
+      <SearchBar onSearch={handleSearch} loading={moviesLoading} initialQuery={initialQuery} />
 
       {error && (
         <div className="rounded-lg bg-red-900/30 border border-red-800 px-4 py-3 text-red-300 text-sm w-full max-w-2xl">

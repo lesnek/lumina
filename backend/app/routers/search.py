@@ -28,6 +28,42 @@ async def search_movies(query: str, language: str | None = None) -> list[TMDBMov
         await client.close()
 
 
+@router.get("/discover/trending", response_model=list[TMDBMovie])
+async def discover_trending(language: str | None = None) -> list[TMDBMovie]:
+    cfg = await get_effective_settings()
+    lang_code = language or cfg.get("languages", "cs").split(",")[0].strip()
+    tmdb_locale = f"{lang_code}-{lang_code.upper()}"
+    client = TMDBClient(cfg["tmdb_api_key"])
+    try:
+        return await client.trending(language=tmdb_locale)
+    finally:
+        await client.close()
+
+
+@router.get("/discover/now-playing", response_model=list[TMDBMovie])
+async def discover_now_playing(language: str | None = None) -> list[TMDBMovie]:
+    cfg = await get_effective_settings()
+    lang_code = language or cfg.get("languages", "cs").split(",")[0].strip()
+    tmdb_locale = f"{lang_code}-{lang_code.upper()}"
+    client = TMDBClient(cfg["tmdb_api_key"])
+    try:
+        return await client.now_playing(language=tmdb_locale)
+    finally:
+        await client.close()
+
+
+@router.get("/discover/popular", response_model=list[TMDBMovie])
+async def discover_popular(language: str | None = None) -> list[TMDBMovie]:
+    cfg = await get_effective_settings()
+    lang_code = language or cfg.get("languages", "cs").split(",")[0].strip()
+    tmdb_locale = f"{lang_code}-{lang_code.upper()}"
+    client = TMDBClient(cfg["tmdb_api_key"])
+    try:
+        return await client.popular(language=tmdb_locale)
+    finally:
+        await client.close()
+
+
 def _to_scorable(results: list[SearchResult]) -> list[ScorableFile]:
     """Convert unified SearchResults into ScorableFiles for the scorer."""
     return [

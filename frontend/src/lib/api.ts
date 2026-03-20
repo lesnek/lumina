@@ -39,6 +39,35 @@ export interface SourceCreate {
   config: Record<string, string>;
 }
 
+// --- Discover ---
+
+export async function getTrending(language?: string): Promise<TMDBMovie[]> {
+  const params = new URLSearchParams();
+  if (language) params.set("language", language);
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetch(`${API_BASE}/api/discover/trending${qs}`);
+  if (!res.ok) throw new Error(`Trending failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getNowPlaying(language?: string): Promise<TMDBMovie[]> {
+  const params = new URLSearchParams();
+  if (language) params.set("language", language);
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetch(`${API_BASE}/api/discover/now-playing${qs}`);
+  if (!res.ok) throw new Error(`Now playing failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getPopular(language?: string): Promise<TMDBMovie[]> {
+  const params = new URLSearchParams();
+  if (language) params.set("language", language);
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetch(`${API_BASE}/api/discover/popular${qs}`);
+  if (!res.ok) throw new Error(`Popular failed: ${res.status}`);
+  return res.json();
+}
+
 // --- Search & Download ---
 
 export async function searchMovies(query: string, language?: string): Promise<TMDBMovie[]> {
