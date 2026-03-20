@@ -468,6 +468,8 @@ async def get_duplicates(mode: str = "simple") -> dict:
                 })
 
             return {"groups": groups, "total_groups": len(groups), "mode": "simple"}
+    finally:
+        await db.close()
 
 
 @router.delete("/file/{file_id}")
