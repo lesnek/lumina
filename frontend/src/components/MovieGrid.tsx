@@ -1,0 +1,49 @@
+"use client";
+
+import Image from "next/image";
+import { TMDBMovie } from "@/lib/api";
+
+interface Props {
+  movies: TMDBMovie[];
+  onSelect: (movie: TMDBMovie) => void;
+}
+
+export default function MovieGrid({ movies, onSelect }: Props) {
+  if (movies.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 w-full">
+      {movies.map((movie) => (
+        <button
+          key={movie.tmdb_id}
+          onClick={() => onSelect(movie)}
+          className="group rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-violet-500 transition-colors text-left"
+        >
+          <div className="aspect-[2/3] relative bg-zinc-800">
+            {movie.poster_url ? (
+              <Image
+                src={movie.poster_url}
+                alt={movie.title}
+                fill
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 16vw"
+                className="object-cover group-hover:opacity-80 transition-opacity"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-zinc-600 text-sm">
+                Bez plakátu
+              </div>
+            )}
+          </div>
+          <div className="p-2">
+            <p className="text-sm font-medium text-zinc-100 truncate">
+              {movie.title}
+            </p>
+            {movie.year && (
+              <p className="text-xs text-zinc-500">{movie.year}</p>
+            )}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
