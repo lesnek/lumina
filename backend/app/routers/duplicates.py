@@ -1,4 +1,4 @@
-import hashlib
+import json
 import logging
 import os
 import re
@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
+import httpx
 from fastapi import APIRouter, HTTPException
 
 from app.config import get_effective_settings
@@ -96,6 +97,9 @@ def _detect_language(filename: str) -> str:
     return "/".join(tags) if tags else "-"
 
 
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+
 async def _ensure_table() -> None:
     """Create duplicates table if not exists."""
     db = await get_db()
@@ -112,6 +116,7 @@ async def _ensure_table() -> None:
                 quality TEXT NOT NULL DEFAULT 'unknown',
                 language TEXT NOT NULL DEFAULT '-',
                 modified_at TEXT NOT NULL DEFAULT '',
+                ai_group TEXT NOT NULL DEFAULT '',
                 scanned_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
@@ -120,6 +125,13 @@ async def _ensure_table() -> None:
             "CREATE INDEX IF NOT EXISTS idx_scanned_norm_title "
             "ON scanned_files (normalized_title, year)"
         )
+        # Add ai_group column if table already exists without it
+        try:
+            await db.execute(
+                "ALTER TABLE scanned_files ADD COLUMN ai_group TEXT NOT NULL DEFAULT ''"
+            )
+        except Exception:
+            pass  # column already exists
         await db.commit()
     finally:
         await db.close()
@@ -194,57 +206,268 @@ async def scan_for_duplicates() -> dict:
     return {"scanned": len(found_files), "media_dir": media_dir}
 
 
+@router.post("/ai-scan")
+async def ai_scan_for_duplicates() -> dict:
+    """Use AI (Groq) to find duplicate groups including translated titles etc."""
+    cfg = await get_effective_settings()
+    groq_key = cfg.get("groq_api_key", "")
+    if not groq_key:
+        raise HTTPException(400, "Groq API key not configured")
+
+    await _ensure_table()
+
+    # First do a normal scan to refresh file list
+    media_dir = cfg["plex_media_dir"]
+    if not os.path.isdir(media_dir):
+        raise HTTPException(400, f"Media directory not found: {media_dir}")
+
+    # Collect files from disk
+    found_files: list[dict] = []
+    for root, _dirs, files in os.walk(media_dir):
+        for fname in files:
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in VIDEO_EXTS:
+                continue
+            full_path = os.path.join(root, fname)
+            try:
+                stat = os.stat(full_path)
+            except OSError:
+                continue
+            norm_title, year = _normalize_title(fname)
+            if not norm_title:
+                continue
+            found_files.append({
+                "path": full_path,
+                "filename": fname,
+                "normalized_title": norm_title,
+                "year": year,
+                "size": stat.st_size,
+                "quality": _detect_quality(fname),
+                "language": _detect_language(fname),
+                "modified_at": datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).isoformat(),
+            })
+
+    if not found_files:
+        return {"scanned": 0, "ai_groups": 0}
+
+    # Build file list for AI — just index + filename
+    file_lines = []
+    for i, f in enumerate(found_files):
+        file_lines.append(f'{i}. {f["filename"]}')
+    file_list_text = "\n".join(file_lines)
+
+    # Send to Groq in batches if needed (max ~200 per request)
+    batch_size = 200
+    all_ai_groups: list[list[int]] = []
+
+    for batch_start in range(0, len(found_files), batch_size):
+        batch_end = min(batch_start + batch_size, len(found_files))
+        batch_lines = file_lines[batch_start:batch_end]
+
+        system_prompt = """\
+You are a file duplicate detector. Given a numbered list of video filenames, \
+find groups of files that are the SAME movie or TV episode — even if filenames \
+differ in language (e.g. Czech "Lhář, lhář" vs English "Liar Liar"), quality, \
+codec, release group, or formatting.
+
+Rules:
+- Group files that are the same content (same movie/episode, different releases)
+- Consider translated titles as duplicates (e.g. "Pelíšky" = "Cosy Dens")
+- Consider different quality versions as duplicates (1080p vs 720p of same movie)
+- Do NOT group different movies, sequels, or different episodes
+- Only return groups with 2 or more files (actual duplicates)
+
+Return ONLY a valid JSON array of arrays, where each inner array contains the \
+file indices (numbers) that belong together. No markdown fences, no explanation.
+
+Example output: [[0, 5, 12], [3, 7]]"""
+
+        user_prompt = f"Files:\n{chr(10).join(batch_lines)}"
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    GROQ_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.1,
+                        "max_tokens": 4096,
+                    },
+                )
+                resp.raise_for_status()
+
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            # Strip markdown fences
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+            if content.endswith("```"):
+                content = content[: content.rfind("```")]
+            content = content.strip()
+
+            groups = json.loads(content)
+            if isinstance(groups, list):
+                for group in groups:
+                    if isinstance(group, list) and len(group) >= 2:
+                        # Adjust indices for batch offset
+                        adjusted = [idx + batch_start for idx in group
+                                    if isinstance(idx, int) and 0 <= idx < batch_end - batch_start]
+                        if len(adjusted) >= 2:
+                            all_ai_groups.append(adjusted)
+        except Exception as e:
+            logger.error("AI duplicate scan failed: %s", e)
+            raise HTTPException(500, f"AI scan failed: {e}")
+
+    # Save to DB with ai_group labels
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM scanned_files")
+
+        for i, f in enumerate(found_files):
+            # Find which AI group this file belongs to
+            ai_group = ""
+            for gi, group in enumerate(all_ai_groups):
+                if i in group:
+                    ai_group = f"ai_{gi}"
+                    break
+
+            await db.execute(
+                """
+                INSERT INTO scanned_files
+                    (path, filename, normalized_title, year, size, quality,
+                     language, modified_at, ai_group)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f["path"], f["filename"], f["normalized_title"],
+                    f["year"], f["size"], f["quality"], f["language"],
+                    f["modified_at"], ai_group,
+                ),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+    logger.info(
+        "AI scanned %d files, found %d duplicate groups",
+        len(found_files), len(all_ai_groups),
+    )
+    return {
+        "scanned": len(found_files),
+        "ai_groups": len(all_ai_groups),
+        "media_dir": media_dir,
+    }
+
+
 @router.get("")
-async def get_duplicates() -> dict:
-    """Return groups of duplicate files (same normalized title + year)."""
+async def get_duplicates(mode: str = "simple") -> dict:
+    """Return groups of duplicate files.
+
+    mode=simple: group by normalized title + year (mechanical)
+    mode=ai: group by AI-detected groups (must run ai-scan first)
+    """
     await _ensure_table()
 
     db = await get_db()
     try:
-        # Find groups with more than 1 file
-        cursor = await db.execute(
-            """
-            SELECT normalized_title, year, COUNT(*) as cnt
-            FROM scanned_files
-            GROUP BY normalized_title, year
-            HAVING cnt > 1
-            ORDER BY cnt DESC, normalized_title
-            """
-        )
-        groups_raw = await cursor.fetchall()
-
-        groups = []
-        for g in groups_raw:
-            title = g["normalized_title"]
-            year = g["year"]
-
-            cursor2 = await db.execute(
+        if mode == "ai":
+            # Use AI groups
+            cursor = await db.execute(
                 """
-                SELECT id, path, filename, size, quality, language, modified_at
+                SELECT ai_group, COUNT(*) as cnt
                 FROM scanned_files
-                WHERE normalized_title = ? AND year = ?
-                ORDER BY size DESC
-                """,
-                (title, year),
+                WHERE ai_group != ''
+                GROUP BY ai_group
+                HAVING cnt > 1
+                ORDER BY cnt DESC
+                """
             )
-            files = [dict(row) for row in await cursor2.fetchall()]
+            groups_raw = await cursor.fetchall()
 
-            # Nice display title: capitalize first letters
-            display_title = title.title()
-            if year:
-                display_title += f" ({year})"
+            groups = []
+            for g in groups_raw:
+                ai_group = g["ai_group"]
 
-            groups.append({
-                "title": display_title,
-                "normalized_title": title,
-                "year": year,
-                "count": len(files),
-                "files": files,
-            })
+                cursor2 = await db.execute(
+                    """
+                    SELECT id, path, filename, size, quality, language, modified_at
+                    FROM scanned_files
+                    WHERE ai_group = ?
+                    ORDER BY size DESC
+                    """,
+                    (ai_group,),
+                )
+                files = [dict(row) for row in await cursor2.fetchall()]
 
-        return {"groups": groups, "total_groups": len(groups)}
-    finally:
-        await db.close()
+                # Use the first file's title as display title
+                if files:
+                    norm, year = _normalize_title(files[0]["filename"])
+                    display_title = norm.title()
+                    if year:
+                        display_title += f" ({year})"
+                else:
+                    display_title = ai_group
+
+                groups.append({
+                    "title": display_title,
+                    "ai_group": ai_group,
+                    "count": len(files),
+                    "files": files,
+                })
+
+            return {"groups": groups, "total_groups": len(groups), "mode": "ai"}
+
+        else:
+            # Simple mode: group by normalized title + year
+            cursor = await db.execute(
+                """
+                SELECT normalized_title, year, COUNT(*) as cnt
+                FROM scanned_files
+                GROUP BY normalized_title, year
+                HAVING cnt > 1
+                ORDER BY cnt DESC, normalized_title
+                """
+            )
+            groups_raw = await cursor.fetchall()
+
+            groups = []
+            for g in groups_raw:
+                title = g["normalized_title"]
+                year = g["year"]
+
+                cursor2 = await db.execute(
+                    """
+                    SELECT id, path, filename, size, quality, language, modified_at
+                    FROM scanned_files
+                    WHERE normalized_title = ? AND year = ?
+                    ORDER BY size DESC
+                    """,
+                    (title, year),
+                )
+                files = [dict(row) for row in await cursor2.fetchall()]
+
+                display_title = title.title()
+                if year:
+                    display_title += f" ({year})"
+
+                groups.append({
+                    "title": display_title,
+                    "normalized_title": title,
+                    "year": year,
+                    "count": len(files),
+                    "files": files,
+                })
+
+            return {"groups": groups, "total_groups": len(groups), "mode": "simple"}
 
 
 @router.delete("/file/{file_id}")

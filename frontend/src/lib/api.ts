@@ -272,8 +272,14 @@ export async function scanDuplicates(): Promise<{ scanned: number; media_dir: st
   return res.json();
 }
 
-export async function getDuplicates(): Promise<{ groups: DuplicateGroup[]; total_groups: number }> {
-  const res = await fetch(`${API_BASE}/api/duplicates`);
+export async function aiScanDuplicates(): Promise<{ scanned: number; ai_groups: number; media_dir: string }> {
+  const res = await fetch(`${API_BASE}/api/duplicates/ai-scan`, { method: "POST" });
+  if (!res.ok) throw new Error(`AI scan failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getDuplicates(mode: "simple" | "ai" = "simple"): Promise<{ groups: DuplicateGroup[]; total_groups: number; mode: string }> {
+  const res = await fetch(`${API_BASE}/api/duplicates?mode=${mode}`);
   if (!res.ok) throw new Error(`Failed to load duplicates: ${res.status}`);
   return res.json();
 }

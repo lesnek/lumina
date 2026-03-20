@@ -6,33 +6,37 @@ import {
   DuplicateGroup,
   DuplicateFile,
   scanDuplicates,
+  aiScanDuplicates,
   getDuplicates,
   deleteDuplicateFile,
   formatSize,
 } from "@/lib/api";
 import DownloadPanel from "@/components/DownloadPanel";
 
+type ScanMode = "simple" | "ai";
+
 export default function DuplicatesPage() {
   const [groups, setGroups] = useState<DuplicateGroup[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [scanType, setScanType] = useState<ScanMode | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [activeMode, setActiveMode] = useState<ScanMode>("simple");
 
-  // Load existing scan results on mount
   useEffect(() => {
-    loadDuplicates();
+    loadDuplicates("simple");
   }, []);
 
-  async function loadDuplicates() {
+  async function loadDuplicates(mode: ScanMode) {
     setLoading(true);
     setError(null);
     try {
-      const data = await getDuplicates();
+      const data = await getDuplicates(mode);
       setGroups(data.groups);
-      // Expand all groups by default
+      setActiveMode(mode);
       setExpandedGroups(new Set(data.groups.map((g) => groupKey(g))));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chyba pri nacitani");
@@ -43,6 +47,7 @@ export default function DuplicatesPage() {
 
   async function handleScan() {
     setScanning(true);
+    setScanType("simple");
     setError(null);
     setScanResult(null);
     try {
@@ -50,11 +55,31 @@ export default function DuplicatesPage() {
       setScanResult(
         `Proskenovano ${result.scanned} souboru v ${result.media_dir}`
       );
-      await loadDuplicates();
+      await loadDuplicates("simple");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scan selhal");
     } finally {
       setScanning(false);
+      setScanType(null);
+    }
+  }
+
+  async function handleAiScan() {
+    setScanning(true);
+    setScanType("ai");
+    setError(null);
+    setScanResult(null);
+    try {
+      const result = await aiScanDuplicates();
+      setScanResult(
+        `AI proskenovalo ${result.scanned} souboru, nalezeno ${result.ai_groups} skupin duplicit`
+      );
+      await loadDuplicates("ai");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI scan selhal");
+    } finally {
+      setScanning(false);
+      setScanType(null);
     }
   }
 
@@ -69,14 +94,10 @@ export default function DuplicatesPage() {
     setDeleting(file.id);
     try {
       await deleteDuplicateFile(file.id);
-      // Update local state — remove file from group
       setGroups((prev) =>
         prev
           .map((g) => {
-            if (
-              g.normalized_title === group.normalized_title &&
-              g.year === group.year
-            ) {
+            if (g.title === group.title) {
               return {
                 ...g,
                 files: g.files.filter((f) => f.id !== file.id),
@@ -95,7 +116,7 @@ export default function DuplicatesPage() {
   }
 
   function groupKey(g: DuplicateGroup) {
-    return `${g.normalized_title}|${g.year}`;
+    return g.title;
   }
 
   function toggleGroup(g: DuplicateGroup) {
@@ -129,6 +150,24 @@ export default function DuplicatesPage() {
     unknown: "bg-zinc-800/50 text-zinc-500 border-zinc-700",
   };
 
+  const spinnerSvg = (
+    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
+  );
+
   return (
     <main className="flex flex-col gap-6 px-4 py-8 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
@@ -140,39 +179,47 @@ export default function DuplicatesPage() {
             &larr; Hledat
           </Link>
           <h1 className="text-2xl font-bold text-zinc-100">Duplicity</h1>
-        </div>
-        <button
-          onClick={handleScan}
-          disabled={scanning}
-          className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium transition-colors"
-        >
-          {scanning ? (
-            <span className="flex items-center gap-2">
-              <svg
-                className="w-4 h-4 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-              Skenuji...
+          {activeMode === "ai" && !loading && groups.length > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-fuchsia-900/30 text-fuchsia-400 border border-fuchsia-800">
+              AI
             </span>
-          ) : (
-            "Skenovat"
           )}
-        </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleScan}
+            disabled={scanning}
+            className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium transition-colors"
+          >
+            {scanning && scanType === "simple" ? (
+              <span className="flex items-center gap-2">
+                {spinnerSvg}
+                Skenuji...
+              </span>
+            ) : (
+              "Skenovat"
+            )}
+          </button>
+          <button
+            onClick={handleAiScan}
+            disabled={scanning}
+            className="px-4 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium transition-colors"
+          >
+            {scanning && scanType === "ai" ? (
+              <span className="flex items-center gap-2">
+                {spinnerSvg}
+                AI skenuje...
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                AI skenovat
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {scanResult && (
@@ -193,10 +240,11 @@ export default function DuplicatesPage() {
         </div>
       ) : groups.length === 0 ? (
         <div className="text-center py-16 space-y-3">
-          <div className="text-zinc-600 text-4xl">✓</div>
+          <div className="text-zinc-600 text-4xl">&#10003;</div>
           <p className="text-zinc-400">Zadne duplicity nenalezeny</p>
           <p className="text-zinc-600 text-sm">
-            Klikni &quot;Skenovat&quot; pro prohledani media slozky
+            Klikni &quot;Skenovat&quot; pro rychle hledani nebo &quot;AI
+            skenovat&quot; pro chytre hledani (vcetne prelozenych nazvu)
           </p>
         </div>
       ) : (
@@ -210,14 +258,12 @@ export default function DuplicatesPage() {
             const key = groupKey(group);
             const expanded = expandedGroups.has(key);
             const totalSize = group.files.reduce((s, f) => s + f.size, 0);
-            const bestFile = group.files[0]; // Sorted by size DESC
 
             return (
               <div
                 key={key}
                 className="rounded-lg border border-zinc-800 bg-zinc-900/50 overflow-hidden"
               >
-                {/* Group header */}
                 <button
                   onClick={() => toggleGroup(group)}
                   className="w-full px-4 py-3 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
@@ -250,7 +296,6 @@ export default function DuplicatesPage() {
                   </span>
                 </button>
 
-                {/* Files table */}
                 {expanded && (
                   <div className="border-t border-zinc-800">
                     <table className="w-full text-sm">
@@ -324,25 +369,7 @@ export default function DuplicatesPage() {
                                 title="Smazat soubor"
                               >
                                 {deleting === file.id ? (
-                                  <svg
-                                    className="w-4 h-4 animate-spin"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <circle
-                                      className="opacity-25"
-                                      cx="12"
-                                      cy="12"
-                                      r="10"
-                                      stroke="currentColor"
-                                      strokeWidth="4"
-                                    />
-                                    <path
-                                      className="opacity-75"
-                                      fill="currentColor"
-                                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                                    />
-                                  </svg>
+                                  spinnerSvg
                                 ) : (
                                   <svg
                                     className="w-4 h-4"
