@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 from typing import Any
 
 import httpx
@@ -88,14 +90,28 @@ class FastShareClient:
         """Cookie string for download authentication."""
         return f"FASTSHARE={self._hash}"
 
+    @staticmethod
+    def _strip_diacritics(text: str) -> str:
+        """Strip diacritics from text — FastShare search doesn't handle them."""
+        nfkd = unicodedata.normalize("NFKD", text)
+        ascii_text = nfkd.encode("ascii", "ignore").decode("ascii")
+        # Clean up punctuation but keep spaces
+        clean = re.sub(r"[^\w\s]", " ", ascii_text).strip()
+        clean = re.sub(r"\s+", " ", clean)
+        return clean
+
     async def search(self, query: str, limit: int = 30) -> list[FastShareFile]:
         await self.ensure_login()
+
+        # FastShare doesn't handle diacritics — strip them
+        clean_query = self._strip_diacritics(query)
+        logger.info("FastShare search: '%s' → '%s'", query, clean_query)
 
         resp = await self._http.get(
             API_URL,
             params={
                 "process": "search",
-                "term": query,
+                "term": clean_query,
                 "pagination": min(limit, 200),
             },
         )
