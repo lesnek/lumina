@@ -267,22 +267,34 @@ async def ai_scan_for_duplicates() -> dict:
         batch_lines = file_lines[batch_start:batch_end]
 
         system_prompt = """\
-You are a file duplicate detector. Given a numbered list of video filenames, \
-find groups of files that are the SAME movie or TV episode — even if filenames \
-differ in language (e.g. Czech "Lhář, lhář" vs English "Liar Liar"), quality, \
-codec, release group, or formatting.
+You are a strict file duplicate detector. Given a numbered list of video filenames, \
+find files that are the EXACT SAME movie or TV episode — just different releases \
+(different quality, codec, release group, or language of the same content).
 
-Rules:
-- Group files that are the same content (same movie/episode, different releases)
-- Consider translated titles as duplicates (e.g. "Pelíšky" = "Cosy Dens")
-- Consider different quality versions as duplicates (1080p vs 720p of same movie)
-- Do NOT group different movies, sequels, or different episodes
-- Only return groups with 2 or more files (actual duplicates)
+STRICT RULES — read carefully:
+- ONLY group files that are truly the same single movie or episode
+- "Hunger Games (2012)" and "Hunger Games - Síla vzdoru (2014)" are DIFFERENT movies — NOT duplicates!
+- Sequels are DIFFERENT movies (Part 1 vs Part 2, Roman numeral I vs II, etc.)
+- Different seasons or episodes are DIFFERENT — NOT duplicates
+- Different years almost always means different movies, even if the franchise name is similar
+- A translated title is a duplicate ONLY if it refers to the same specific movie \
+  (e.g. "Lhář, lhář (1997)" = "Liar Liar (1997)" — same movie, same year)
+- When in doubt, do NOT group them — false negatives are much better than false positives
 
-Return ONLY a valid JSON array of arrays, where each inner array contains the \
-file indices (numbers) that belong together. No markdown fences, no explanation.
+VALID duplicates examples:
+- "Movie.2020.1080p.BluRay.mkv" and "Movie.2020.720p.WEB.mkv" (same movie, different quality)
+- "Pelíšky (1999) CZ.avi" and "Cosy.Dens.1999.1080p.mkv" (same movie, translated title)
 
-Example output: [[0, 5, 12], [3, 7]]"""
+NOT duplicates:
+- "Hunger Games (2012)" vs "Hunger Games Catching Fire (2013)" (different movies in a franchise)
+- "Avatar (2009)" vs "Avatar The Way of Water (2022)" (sequel)
+- "The Office S01E01" vs "The Office S01E02" (different episodes)
+
+Return ONLY a valid JSON array of arrays, where each inner array contains \
+file indices that are the same movie. No markdown, no explanation. \
+Return [] if there are no duplicates.
+
+Example: [[0, 5], [3, 7]]"""
 
         user_prompt = f"Files:\n{chr(10).join(batch_lines)}"
 
