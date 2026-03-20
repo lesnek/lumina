@@ -1,38 +1,42 @@
-import base64
 import logging
-import re
-import unicodedata
+from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-BASE_CZ = "https://fastshare.cz"
-BASE_CLOUD = "https://fastshare.cloud"
+API_URL = "https://fastshare.cz/api/api_kodi.php"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
 
 
 class FastShareFile:
-    """Raw file parsed from FastShare search HTML."""
+    """File from FastShare KODI API search."""
 
-    def __init__(self, file_id: str, name: str, size_text: str) -> None:
+    def __init__(
+        self,
+        file_id: str,
+        name: str,
+        size: int,
+        download_url: str = "",
+        resolution: str = "",
+        duration: int = 0,
+    ) -> None:
         self.file_id = file_id
         self.name = name
-        self.size = self._parse_size(size_text)
-
-    @staticmethod
-    def _parse_size(text: str) -> int:
-        text = text.strip().upper()
-        match = re.match(r"([\d.]+)\s*(GB|MB|KB|TB)", text)
-        if not match:
-            return 0
-        val = float(match.group(1))
-        unit = match.group(2)
-        multipliers = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
-        return int(val * multipliers.get(unit, 1))
+        self.size = size
+        self.download_url = download_url
+        self.resolution = resolution
+        self.duration = duration
 
 
 class FastShareClient:
+    """FastShare client using the official KODI JSON API (api_kodi.php).
+
+    Authentication uses the "Login pro PC, Android a KODI aplikace"
+    credentials (not the web login). Login returns a hash token used
+    as a FASTSHARE=<hash> cookie for premium downloads.
+    """
+
     def __init__(self, login: str, password: str) -> None:
         self._login = login
         self._password = password
@@ -41,181 +45,170 @@ class FastShareClient:
             follow_redirects=True,
             headers={"User-Agent": UA},
         )
-        self._logged_in = False
-        self._user_id: str = ""
+        self._hash: str = ""
+        self._unlimited: bool = False
+        self._credit_mb: int = 0
+        # Cache: file_id → download_url (populated during search)
+        self._download_cache: dict[str, str] = {}
 
     async def ensure_login(self) -> None:
-        if self._logged_in:
+        if self._hash:
             return
-        resp = await self._http.post(
-            f"{BASE_CZ}/sql.php",
-            data={"login": self._login, "heslo": self._password},
-        )
-        final_url = str(resp.url)
-        if "error" in final_url or "login" in final_url:
-            raise RuntimeError(f"FastShare login failed (redirected to {final_url})")
-        self._logged_in = True
-        logger.info("FastShare login successful")
 
-    async def search(self, query: str, limit: int = 20) -> list[FastShareFile]:
+        resp = await self._http.get(
+            API_URL,
+            params={
+                "process": "login",
+                "login": self._login,
+                "password": self._password,
+            },
+        )
+        data = resp.json()
+        logger.info("FastShare login response keys: %s", list(data.keys()))
+
+        user = data.get("user")
+        if not user or not user.get("hash"):
+            error = data.get("error", data)
+            raise RuntimeError(f"FastShare KODI login failed: {error}")
+
+        self._hash = user["hash"]
+        self._unlimited = str(user.get("unlimited", "")).lower() == "true"
+        credit_data = user.get("data", {})
+        self._credit_mb = int(credit_data.get("value", 0)) if credit_data else 0
+
+        logger.info(
+            "FastShare login OK: hash=%s***, unlimited=%s, credit=%d MB",
+            self._hash[:8],
+            self._unlimited,
+            self._credit_mb,
+        )
+
+    @property
+    def auth_cookie(self) -> str:
+        """Cookie string for download authentication."""
+        return f"FASTSHARE={self._hash}"
+
+    async def search(self, query: str, limit: int = 30) -> list[FastShareFile]:
         await self.ensure_login()
 
-        nfkd = unicodedata.normalize("NFKD", query)
-        ascii_query = nfkd.encode("ascii", "ignore").decode("ascii")
-        slug = re.sub(r"[^\w\s-]", "", ascii_query).strip().replace(" ", "-").lower()
-        slug = slug or "search"
-        page_resp = await self._http.get(f"{BASE_CLOUD}/{slug}/s")
-
-        token_match = re.search(
-            r'id="search_token"\s+value="([^"]+)"', page_resp.text
-        )
-        uid_match = re.search(r"u=(\d+)&", page_resp.text)
-
-        if not token_match:
-            logger.warning("FastShare: could not find search_token")
-            return []
-
-        token = token_match.group(1)
-        self._user_id = uid_match.group(1) if uid_match else ""
-        logger.info(
-            "FastShare search: slug=%s, token=%s, user_id=%s",
-            slug, token[:8], self._user_id,
-        )
-
-        # Step 2: AJAX search (step=0 is first page, limit=1 means page 1)
-        # FastShare search doesn't handle diacritics — use the ASCII-stripped
-        # version as the search term (same text used for slug, but with spaces)
-        clean_query = re.sub(r"[^\w\s]", "", ascii_query).strip().lower()
-        clean_query = clean_query or query
-        term_b64 = base64.b64encode(clean_query.encode("utf-8")).decode("ascii")
-        ajax_resp = await self._http.get(
-            f"{BASE_CLOUD}/test2.php",
+        resp = await self._http.get(
+            API_URL,
             params={
-                "token": token,
-                "u": self._user_id,
-                "term": term_b64,
-                "type": "video",
-                "limit": 1,
-                "step": 0,
-                "search_purpose": "",
-                "search_resolution": "",
-                "plain_search": "0",
-                "order": "",
+                "process": "search",
+                "term": query,
+                "pagination": min(limit, 200),
             },
-            headers={"Referer": f"{BASE_CLOUD}/{slug}/s"},
         )
 
-        logger.info(
-            "FastShare AJAX response: %d bytes, status %d",
-            len(ajax_resp.text), ajax_resp.status_code,
-        )
+        data = resp.json()
+        search_data = data.get("search", {})
+        file_list: list[dict[str, Any]] = search_data.get("file", [])
 
-        # "nebylo nic nalezeno" = nothing found
-        if "nebylo nic nalezeno" in ajax_resp.text:
-            logger.info("FastShare: no results for query '%s'", query)
+        if not file_list:
+            logger.info("FastShare: no results for '%s'", query)
             return []
 
-        files = self._parse_search_html(ajax_resp.text, limit)
-        logger.info("FastShare parsed %d files", len(files))
-        return files
-
-    def _parse_search_html(self, html: str, limit: int) -> list[FastShareFile]:
-        """Extract files from the AJAX HTML fragment."""
         files: list[FastShareFile] = []
+        for item in file_list[:limit]:
+            filename = item.get("filename", "")
+            download_url = item.get("download_url", "")
+            file_id = str(item.get("id", ""))
+            if not file_id:
+                file_id = self._extract_file_id(download_url, item)
 
-        # FastShare uses unquoted href attributes:
-        #   <a href=https://fastshare.cloud/26237359/hele-kamo-kdo-tu-vari-2005-.mkv
-        file_links = re.findall(
-            r'href=https://fastshare\.cloud/(\d+)/([^\s<>"]+)', html
+            size_data = item.get("data", {})
+            size = int(size_data.get("value", 0)) if size_data else 0
+
+            duration_data = item.get("duration", {})
+            duration = int(duration_data.get("value", 0)) if duration_data else 0
+
+            resolution = item.get("resolution", "")
+
+            f = FastShareFile(
+                file_id=file_id,
+                name=filename,
+                size=size,
+                download_url=download_url,
+                resolution=resolution,
+                duration=duration,
+            )
+            files.append(f)
+
+            # Cache the download URL for later use
+            if download_url and file_id:
+                self._download_cache[file_id] = download_url
+
+        logger.info(
+            "FastShare search '%s': %d results, %d with download URLs",
+            query,
+            len(files),
+            sum(1 for f in files if f.download_url),
         )
-        # Sizes from video_time spans — filter only actual size values (e.g. "1.9GB"),
-        # not resolution strings (e.g. "&nbsp;&nbsp;1920x1080")
-        all_video_time = re.findall(
-            r'class="video_time[^"]*">([^<]+)</span>', html
-        )
-        sizes = [s for s in all_video_time if re.match(r'[\d.]+\s*[GMKT]B', s.strip(), re.IGNORECASE)]
-
-        # Deduplicate by file_id (same file appears multiple times in HTML)
-        seen: set[str] = set()
-        size_idx = 0
-        for file_id, raw_name in file_links:
-            if file_id in seen:
-                continue
-            seen.add(file_id)
-
-            # Clean up name: replace hyphens, decode URL encoding
-            name = raw_name.replace("-", " ").strip()
-            # Get corresponding size
-            size_text = sizes[size_idx] if size_idx < len(sizes) else "0MB"
-            size_idx += 1
-
-            files.append(FastShareFile(file_id, name, size_text))
-            if len(files) >= limit:
-                break
-
         return files
+
+    @staticmethod
+    def _extract_file_id(download_url: str, item: dict) -> str:
+        """Extract numeric file ID from download URL or item data."""
+        # download_url looks like: https://data42.fastshare.cz/download.php?id=12345&...
+        if download_url:
+            import re
+            match = re.search(r'[?&]id=(\d+)', download_url)
+            if match:
+                return match.group(1)
+            # Or from URL path like /12345/filename
+            match = re.search(r'/(\d{5,})', download_url)
+            if match:
+                return match.group(1)
+
+        # Fallback: use hash of filename as ID (not ideal but works for cache)
+        filename = item.get("filename", "unknown")
+        return str(abs(hash(filename)) % 10**10)
 
     async def get_download_url(self, file_id: str) -> str:
-        """Get a direct download URL — uses premium speed if logged in."""
+        """Get download URL for a file.
+
+        For premium: uses cached URL from search results.
+        Returns the download_url that needs FASTSHARE cookie header.
+        """
         await self.ensure_login()
 
-        # Load file page to get CSRF token
-        page_resp = await self._http.get(
-            f"{BASE_CLOUD}/{file_id}/file",
-            headers={"Referer": BASE_CLOUD},
+        # Check cache first (populated during search)
+        cached = self._download_cache.get(file_id)
+        if cached:
+            logger.info("FastShare: download URL from cache for %s", file_id)
+            return cached
+
+        # If not cached, we can't easily get it from the KODI API
+        # (no file_info endpoint). Fall back to constructing a URL
+        # that the user can access with their premium cookie.
+        # This is a last resort — normally URLs come from search.
+        logger.warning(
+            "FastShare: no cached download URL for file %s, "
+            "trying direct download endpoint",
+            file_id,
         )
 
-        csrf_match = re.search(r'name="csrf"\s+value="([^"]+)"', page_resp.text)
-        if not csrf_match:
-            raise RuntimeError(f"FastShare: CSRF token not found for file {file_id}")
-        csrf = csrf_match.group(1)
+        # Try the fastshare.cz file page — with the hash cookie set,
+        # it might redirect to the download
+        resp = await self._http.get(
+            f"https://fastshare.cz/{file_id}",
+            headers={
+                "Cookie": self.auth_cookie,
+                "Referer": "https://fastshare.cz/",
+            },
+            follow_redirects=False,
+        )
 
-        # Try premium/VIP download first, then fall back to free
-        for endpoint in ("/download/", "/free/"):
-            resp = await self._http.post(
-                f"{BASE_CLOUD}{endpoint}",
-                params={"lang": "cs", "u": file_id},
-                data={"csrf": csrf},
-                headers={"Referer": f"{BASE_CLOUD}/{file_id}/file"},
-                follow_redirects=False,
-            )
-
-            # Redirect to download URL (typical for non-VIP or some VIP flows)
-            if resp.status_code in (301, 302, 303, 307):
-                download_url = resp.headers.get("location", "")
-                if "download" in download_url:
-                    logger.info("FastShare: got redirect from %s for file %s", endpoint, file_id)
-                    return download_url
-
-            # 200 response — VIP accounts may get the download link in the HTML body
-            if resp.status_code == 200:
-                # Look for a direct download link in the response
-                link_match = re.search(
-                    r'href=["\']?(https?://[^"\'>\s]*download[^"\'>\s]*)["\']?',
-                    resp.text,
-                )
-                if link_match:
-                    url = link_match.group(1)
-                    logger.info("FastShare: found download link in %s response for file %s", endpoint, file_id)
-                    return url
-
-                # Some VIP responses embed the URL in a JS redirect
-                js_match = re.search(
-                    r'(?:window\.location|location\.href)\s*=\s*["\']([^"\']+download[^"\']*)["\']',
-                    resp.text,
-                )
-                if js_match:
-                    url = js_match.group(1)
-                    logger.info("FastShare: found JS redirect in %s response for file %s", endpoint, file_id)
-                    return url
-
-                logger.warning(
-                    "FastShare: got 200 from %s but no download link found (body: %s...)",
-                    endpoint, resp.text[:500],
-                )
+        if resp.status_code in (301, 302, 303, 307):
+            location = resp.headers.get("location", "")
+            if "download" in location:
+                logger.info("FastShare: redirect download for %s → %s", file_id, location)
+                self._download_cache[file_id] = location
+                return location
 
         raise RuntimeError(
-            f"FastShare: could not obtain download URL for file {file_id}"
+            f"FastShare: no download URL for file {file_id}. "
+            f"Try searching for the file first."
         )
 
     async def close(self) -> None:

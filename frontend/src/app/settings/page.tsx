@@ -32,9 +32,10 @@ const SOURCE_TYPES = [
     type: "fastshare",
     label: "FastShare",
     fields: [
-      { key: "login", label: "Login", type: "text" },
-      { key: "heslo", label: "Heslo", type: "password" },
+      { key: "login", label: "Login (KODI/API)", type: "text", placeholder: "g-xxxxxxxxxx-xxx" },
+      { key: "password", label: "Heslo (KODI/API)", type: "password" },
     ],
+    hint: "Použij přihlašovací údaje z \"Login pro PC, Android a KODI aplikace\" (ne webový login)",
   },
   {
     type: "jackett",

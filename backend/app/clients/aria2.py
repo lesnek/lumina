@@ -37,19 +37,25 @@ class Aria2Client:
     async def add_uri(
         self, uri: str, directory: str, filename: str = "",
         single_connection: bool = False,
+        headers: dict[str, str] | None = None,
     ) -> str:
         """Add a download to Aria2 and return the GID.
 
         Args:
             single_connection: If True, disable segmented downloading.
                 Use for servers that don't support Range requests (e.g. FastShare).
+            headers: Optional HTTP headers to send with the download request.
+                Used for cookie-based auth (e.g. FastShare FASTSHARE=<hash>).
         """
-        options: dict[str, str] = {"dir": directory}
+        options: dict[str, str | list[str]] = {"dir": directory}
         if filename:
             options["out"] = filename
         if single_connection:
             options["split"] = "1"
             options["max-connection-per-server"] = "1"
+        if headers:
+            # aria2 accepts headers as a list of "Key: Value" strings
+            options["header"] = [f"{k}: {v}" for k, v in headers.items()]
         data = await self._rpc("aria2.addUri", [[uri], options])
         return data["result"]
 

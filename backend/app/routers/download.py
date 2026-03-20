@@ -23,11 +23,13 @@ async def start_download(req: DownloadRequest) -> dict:
         aria2 = Aria2Client(cfg["aria2_rpc_url"], cfg["aria2_rpc_secret"])
         try:
             # DDL servers (FastShare, WebShare) don't support Range requests
-            # so we must download in a single connection to avoid errors
+            # so we must download in a single connection to avoid errors.
+            # Some sources (FastShare) need auth cookies passed as headers.
             gid = await aria2.add_uri(
                 download_info["url"],
                 directory=target_dir,
                 single_connection=True,
+                headers=download_info.get("headers"),
             )
             return {
                 "gid": gid,

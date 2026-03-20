@@ -8,7 +8,7 @@ class FastShareSource(BaseSource):
 
     def __init__(self, source_id: int, config: dict) -> None:
         super().__init__(source_id, config)
-        self._client = FastShareClient(config["login"], config["heslo"])
+        self._client = FastShareClient(config["login"], config["password"])
 
     async def search(self, query: str, limit: int = 30) -> list[SearchResult]:
         files = await self._client.search(query, limit)
@@ -25,7 +25,10 @@ class FastShareSource(BaseSource):
 
     async def get_download_info(self, ident: str) -> dict:
         url = await self._client.get_download_url(ident)
-        return {"url": url}
+        return {
+            "url": url,
+            "headers": {"Cookie": self._client.auth_cookie},
+        }
 
     async def test_connection(self) -> bool:
         try:
