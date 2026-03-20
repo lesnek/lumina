@@ -246,6 +246,44 @@ export async function getLanguages(): Promise<LanguageOption[]> {
   return res.json();
 }
 
+// --- Duplicates ---
+
+export interface DuplicateFile {
+  id: number;
+  path: string;
+  filename: string;
+  size: number;
+  quality: string;
+  language: string;
+  modified_at: string;
+}
+
+export interface DuplicateGroup {
+  title: string;
+  normalized_title: string;
+  year: string;
+  count: number;
+  files: DuplicateFile[];
+}
+
+export async function scanDuplicates(): Promise<{ scanned: number; media_dir: string }> {
+  const res = await fetch(`${API_BASE}/api/duplicates/scan`, { method: "POST" });
+  if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getDuplicates(): Promise<{ groups: DuplicateGroup[]; total_groups: number }> {
+  const res = await fetch(`${API_BASE}/api/duplicates`);
+  if (!res.ok) throw new Error(`Failed to load duplicates: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteDuplicateFile(fileId: number): Promise<{ ok: boolean; deleted: string }> {
+  const res = await fetch(`${API_BASE}/api/duplicates/file/${fileId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+  return res.json();
+}
+
 // --- Utilities ---
 
 export function formatSize(bytes: number): string {

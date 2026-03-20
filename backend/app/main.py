@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
-from app.routers import search, download, sources, settings
+from app.routers import search, download, sources, settings, duplicates
 from app.sources.registry import SourceRegistry
 
 
@@ -29,6 +29,7 @@ app.include_router(search.router)
 app.include_router(download.router)
 app.include_router(sources.router)
 app.include_router(settings.router)
+app.include_router(duplicates.router)
 
 
 @app.get("/api/health")
