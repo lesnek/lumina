@@ -13,7 +13,7 @@ DEFAULTS = {
     "tmdb_api_key": "",
     "groq_api_key": "",
     "aria2_rpc_url": "http://aria2:6800/jsonrpc",
-    "aria2_rpc_secret": "",
+    "aria2_rpc_secret": "your_aria2_secret",
     "plex_media_dir": "/downloads/plex",
     "qbittorrent_url": "",
     "qbittorrent_username": "admin",

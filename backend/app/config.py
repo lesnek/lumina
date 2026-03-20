@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     tmdb_api_key: str = ""
     groq_api_key: str = ""
     aria2_rpc_url: str = "http://aria2:6800/jsonrpc"
-    aria2_rpc_secret: str = ""
+    aria2_rpc_secret: str = "your_aria2_secret"
     plex_media_dir: str = "/downloads/plex"
 
     qbittorrent_url: str = ""
