@@ -22,6 +22,7 @@ RUN apk add --no-cache libc6-compat
 
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 # sharp for image optimization in standalone mode
 COPY --from=deps /app/node_modules/sharp ./node_modules/sharp
 COPY --from=deps /app/node_modules/@img ./node_modules/@img
