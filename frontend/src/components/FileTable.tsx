@@ -35,7 +35,7 @@ function sourceLink(file: ScoredFile): string | null {
     const ext = file.name.match(/\.[^.]+$/)?.[0] || "";
     const noExt = file.name.replace(/\.[^.]+$/, "");
     const noDiacritics = noExt.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const slug = noDiacritics.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const slug = noDiacritics.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-|-$/g, "");
     return `https://fastshare.cloud/${file.ident}/${slug}${ext.toLowerCase()}`;
   }
   if (file.source === "webshare") return `https://webshare.cz/file/${file.ident}/`;
