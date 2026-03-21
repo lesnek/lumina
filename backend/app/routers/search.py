@@ -64,6 +64,18 @@ async def discover_recently_digital(language: str | None = None) -> list[TMDBMov
         await client.close()
 
 
+@router.get("/discover/recently-digital-tv", response_model=list[TMDBMovie])
+async def discover_recently_digital_tv(language: str | None = None) -> list[TMDBMovie]:
+    cfg = await get_effective_settings()
+    lang_code = language or cfg.get("languages", "cs").split(",")[0].strip()
+    tmdb_locale = f"{lang_code}-{lang_code.upper()}"
+    client = TMDBClient(cfg["tmdb_api_key"])
+    try:
+        return await client.recently_digital_tv(language=tmdb_locale)
+    finally:
+        await client.close()
+
+
 @router.get("/discover/popular", response_model=list[TMDBMovie])
 async def discover_popular(language: str | None = None) -> list[TMDBMovie]:
     cfg = await get_effective_settings()

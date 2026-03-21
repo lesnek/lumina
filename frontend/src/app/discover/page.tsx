@@ -4,27 +4,38 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { TMDBMovie, getTrending, getRecentlyDigital } from "@/lib/api";
+import { TMDBMovie, getTrending, getRecentlyDigital, getRecentlyDigitalTV } from "@/lib/api";
 import DownloadPanel from "@/components/DownloadPanel";
+import MovieDetailModal from "@/components/MovieDetailModal";
 
 interface Section {
   title: string;
   fetcher: () => Promise<TMDBMovie[]>;
 }
 
-const SECTIONS: Section[] = [
+const FILM_SECTIONS: Section[] = [
   { title: "Nedavno online", fetcher: getRecentlyDigital },
   { title: "Trending tento tyden", fetcher: getTrending },
 ];
 
+const TV_SECTIONS: Section[] = [
+  { title: "Nedavno online", fetcher: getRecentlyDigitalTV },
+];
+
+type Tab = "filmy" | "serialy";
+
 export default function DiscoverPage() {
   const router = useRouter();
-  const [data, setData] = useState<Record<string, TMDBMovie[]>>({} as Record<string, TMDBMovie[]>);
-  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>("filmy");
+  const [filmData, setFilmData] = useState<Record<string, TMDBMovie[]>>({});
+  const [tvData, setTvData] = useState<Record<string, TMDBMovie[]>>({});
+  const [filmLoading, setFilmLoading] = useState(true);
+  const [tvLoading, setTvLoading] = useState(true);
+  const [selectedMovie, setSelectedMovie] = useState<TMDBMovie | null>(null);
 
   useEffect(() => {
     Promise.all(
-      SECTIONS.map(async (s) => {
+      FILM_SECTIONS.map(async (s) => {
         try {
           const movies = await s.fetcher();
           return [s.title, movies] as const;
@@ -34,22 +45,39 @@ export default function DiscoverPage() {
       })
     ).then((results) => {
       const map: Record<string, TMDBMovie[]> = {};
-      for (const [title, movies] of results) {
-        map[title] = movies;
-      }
-      setData(map);
-      setLoading(false);
+      for (const [title, movies] of results) map[title] = movies;
+      setFilmData(map);
+      setFilmLoading(false);
+    });
+
+    Promise.all(
+      TV_SECTIONS.map(async (s) => {
+        try {
+          const shows = await s.fetcher();
+          return [s.title, shows] as const;
+        } catch {
+          return [s.title, [] as TMDBMovie[]] as const;
+        }
+      })
+    ).then((results) => {
+      const map: Record<string, TMDBMovie[]> = {};
+      for (const [title, shows] of results) map[title] = shows;
+      setTvData(map);
+      setTvLoading(false);
     });
   }, []);
 
-  function handleSelect(movie: TMDBMovie) {
-    // Pass movie data so home page can skip TMDB search and go straight to file search
+  function handleSearch(movie: TMDBMovie) {
     const movieData = btoa(encodeURIComponent(JSON.stringify(movie)));
     router.push(`/?movie=${movieData}`);
   }
 
+  const sections = tab === "filmy" ? FILM_SECTIONS : TV_SECTIONS;
+  const data = tab === "filmy" ? filmData : tvData;
+  const loading = tab === "filmy" ? filmLoading : tvLoading;
+
   return (
-    <main className="flex flex-col gap-10 px-4 py-8 max-w-7xl mx-auto">
+    <main className="flex flex-col gap-8 px-4 py-8 max-w-7xl mx-auto">
       <div className="flex items-center gap-4">
         <Link
           href="/"
@@ -60,24 +88,48 @@ export default function DiscoverPage() {
         <h1 className="text-2xl font-bold text-zinc-100">Objevit</h1>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 bg-zinc-900 rounded-lg p-1 w-fit border border-zinc-800">
+        <button
+          onClick={() => setTab("filmy")}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+            tab === "filmy"
+              ? "bg-violet-600 text-white shadow"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          Filmy
+        </button>
+        <button
+          onClick={() => setTab("serialy")}
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${
+            tab === "serialy"
+              ? "bg-violet-600 text-white shadow"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          Serialy
+        </button>
+      </div>
+
       {loading ? (
         <div className="text-zinc-500 animate-pulse text-center py-12">
-          Nacitam filmy...
+          Nacitam...
         </div>
       ) : (
-        SECTIONS.map((section) => {
-          const movies = data[section.title] || [];
-          if (movies.length === 0) return null;
+        sections.map((section) => {
+          const items = data[section.title] || [];
+          if (items.length === 0) return null;
           return (
-            <section key={section.title}>
+            <section key={`${tab}-${section.title}`}>
               <h2 className="text-lg font-semibold text-zinc-200 mb-4">
                 {section.title}
               </h2>
               <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-zinc-700">
-                {movies.map((movie) => (
+                {items.map((movie) => (
                   <button
                     key={movie.tmdb_id}
-                    onClick={() => handleSelect(movie)}
+                    onClick={() => setSelectedMovie(movie)}
                     className="group flex-shrink-0 w-36 rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 hover:border-violet-500 transition-colors text-left"
                   >
                     <div className="aspect-[2/3] relative bg-zinc-800">
@@ -109,6 +161,15 @@ export default function DiscoverPage() {
             </section>
           );
         })
+      )}
+
+      {/* Detail modal */}
+      {selectedMovie && (
+        <MovieDetailModal
+          movie={selectedMovie}
+          onClose={() => setSelectedMovie(null)}
+          onSearch={handleSearch}
+        />
       )}
 
       <DownloadPanel />

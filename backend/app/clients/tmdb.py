@@ -87,5 +87,41 @@ class TMDBClient:
         resp.raise_for_status()
         return await self._parse_movies(resp.json().get("results", []))
 
+    async def recently_digital_tv(self, language: str = "cs-CZ", days: int = 90) -> list[TMDBMovie]:
+        """TV shows with recent episodes in the last N days."""
+        today = date.today()
+        date_from = (today - timedelta(days=days)).isoformat()
+        date_to = today.isoformat()
+        resp = await self._http.get(
+            f"{API_BASE}/discover/tv",
+            params={
+                "api_key": self._api_key,
+                "language": language,
+                "air_date.gte": date_from,
+                "air_date.lte": date_to,
+                "sort_by": "popularity.desc",
+                "with_original_language": "en|cs",
+            },
+        )
+        resp.raise_for_status()
+        return await self._parse_tv(resp.json().get("results", []))
+
+    async def _parse_tv(self, items: list, limit: int = 20) -> list[TMDBMovie]:
+        shows: list[TMDBMovie] = []
+        for item in items[:limit]:
+            air_date = item.get("first_air_date", "") or ""
+            poster_path = item.get("poster_path")
+            shows.append(
+                TMDBMovie(
+                    tmdb_id=item["id"],
+                    title=item.get("name", ""),
+                    original_title=item.get("original_name", ""),
+                    year=air_date[:4] if len(air_date) >= 4 else "",
+                    overview=item.get("overview", ""),
+                    poster_url=f"{IMG_BASE}{poster_path}" if poster_path else None,
+                )
+            )
+        return shows
+
     async def close(self) -> None:
         await self._http.aclose()

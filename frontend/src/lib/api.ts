@@ -68,6 +68,15 @@ export async function getRecentlyDigital(language?: string): Promise<TMDBMovie[]
   return res.json();
 }
 
+export async function getRecentlyDigitalTV(language?: string): Promise<TMDBMovie[]> {
+  const params = new URLSearchParams();
+  if (language) params.set("language", language);
+  const qs = params.toString() ? `?${params}` : "";
+  const res = await fetch(`${API_BASE}/api/discover/recently-digital-tv${qs}`);
+  if (!res.ok) throw new Error(`Recently digital TV failed: ${res.status}`);
+  return res.json();
+}
+
 export async function getPopular(language?: string): Promise<TMDBMovie[]> {
   const params = new URLSearchParams();
   if (language) params.set("language", language);
