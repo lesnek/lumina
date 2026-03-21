@@ -22,6 +22,9 @@ class FastShareFile:
         download_url: str = "",
         resolution: str = "",
         duration: int = 0,
+        duration_f: str = "",
+        thumbnail: str = "",
+        uploaded_date: str = "",
     ) -> None:
         self.file_id = file_id
         self.name = name
@@ -29,6 +32,9 @@ class FastShareFile:
         self.download_url = download_url
         self.resolution = resolution
         self.duration = duration
+        self.duration_f = duration_f
+        self.thumbnail = thumbnail
+        self.uploaded_date = uploaded_date
 
 
 class FastShareClient:
@@ -140,6 +146,10 @@ class FastShareClient:
 
             resolution = item.get("resolution", "")
 
+            duration_f = item.get("duration_f", "")
+            thumbnail = item.get("thumbnail", "")
+            uploaded_date = item.get("uploaded_date", "")
+
             f = FastShareFile(
                 file_id=file_id,
                 name=filename,
@@ -147,6 +157,9 @@ class FastShareClient:
                 download_url=download_url,
                 resolution=resolution,
                 duration=duration,
+                duration_f=duration_f,
+                thumbnail=thumbnail,
+                uploaded_date=uploaded_date,
             )
             files.append(f)
 

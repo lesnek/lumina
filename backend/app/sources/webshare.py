@@ -19,6 +19,8 @@ class WebShareSource(BaseSource):
                 ident=f.ident,
                 name=f.name,
                 size=f.size,
+                votes_up=f.positive_votes,
+                votes_down=f.negative_votes,
             )
             for f in files
         ]

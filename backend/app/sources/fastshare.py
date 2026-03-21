@@ -21,6 +21,10 @@ class FastShareSource(BaseSource):
                 ident=f.file_id,
                 name=f.name,
                 size=f.size,
+                resolution=f.resolution if f.resolution != "x" else "",
+                duration=f.duration_f,
+                thumbnail=f.thumbnail,
+                uploaded_at=f.uploaded_date.split(" ")[0] if f.uploaded_date else "",
             )
             for f in files
         ]

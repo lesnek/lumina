@@ -253,6 +253,7 @@ async def score_results(
                     source_id=f.source_id,
                     magnet_url=f.magnet_url,
                     seeders=f.seeders,
+                    meta=f.meta,
                 )
             )
 
@@ -305,6 +306,7 @@ def _fallback_scoring(
                 source_id=f.source_id,
                 magnet_url=f.magnet_url,
                 seeders=f.seeders,
+                meta=f.meta,
             )
         )
     results.sort(key=lambda r: (-r.relevance_score, -r.size))

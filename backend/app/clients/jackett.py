@@ -45,6 +45,11 @@ class JackettClient:
             leechers = max(0, peers - seeders)
             category = ", ".join(str(c) for c in item.get("Category", []))
 
+            genres = item.get("Genres") or []
+            description = item.get("Description") or ""
+            grabs = item.get("Grabs")
+            published = (item.get("PublishDate") or "")[:10]  # "2026-02-05"
+
             results.append(
                 TorrentResult(
                     title=title,
@@ -54,6 +59,10 @@ class JackettClient:
                     magnet_url=magnet_url or link,
                     link=link,
                     category=category,
+                    genres=genres,
+                    description=description,
+                    grabs=grabs,
+                    published_date=published,
                 )
             )
 
