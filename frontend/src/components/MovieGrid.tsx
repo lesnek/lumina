@@ -33,11 +33,11 @@ export default function MovieGrid({ movies, onSelect }: Props) {
                 Bez plakátu
               </div>
             )}
-            {movie.media_type === "tv" && (
-              <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-violet-600 text-[10px] font-bold text-white uppercase tracking-wide">
-                TV
-              </span>
-            )}
+            <span className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold text-white uppercase tracking-wide ${
+              movie.media_type === "tv" ? "bg-violet-600" : "bg-blue-600"
+            }`}>
+              {movie.media_type === "tv" ? "TV" : "Film"}
+            </span>
           </div>
           <div className="p-2">
             <p className="text-sm font-medium text-zinc-100 truncate">
