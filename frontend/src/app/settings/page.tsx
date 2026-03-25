@@ -39,7 +39,7 @@ const SOURCE_TYPES = [
       { key: "login", label: "Login (KODI/API)", type: "text", placeholder: "g-xxxxxxxxxx-xxx" },
       { key: "password", label: "Heslo (KODI/API)", type: "password" },
     ],
-    hint: "Use KODI/API credentials from FastShare settings",
+    hint: "Použij přihlašovací údaje z \"Login pro PC, Android a KODI aplikace\" (ne webový login)",
   },
   {
     type: "jackett",
@@ -81,47 +81,59 @@ const INTEGRATION_TYPES = [
   },
 ];
 
-const SETTINGS_SECTIONS = [
+const GENERAL_SECTIONS = [
   {
-    title: "API Keys",
+    title: "API klíče",
     icon: "🔑",
     fields: [
-      { key: "tmdb_api_key", label: "TMDB API Key", type: "password", hint: "For movie search (themoviedb.org)" },
-      { key: "groq_api_key", label: "Groq API Key", type: "password", hint: "For AI file scoring (console.groq.com)" },
+      { key: "tmdb_api_key", label: "TMDB API Key", type: "password", hint: "Pro vyhledávání filmů (themoviedb.org)" },
+      { key: "groq_api_key", label: "Groq API Key", type: "password", hint: "Pro AI hodnocení souborů (console.groq.com)" },
     ],
   },
   {
-    title: "Download",
+    title: "Stahování",
     icon: "📁",
     fields: [
-      { key: "plex_media_dir", label: "Movies Folder", type: "folder", hint: "Target folder for movies (in container)" },
-      { key: "tv_media_dir", label: "TV Shows Folder", type: "folder", hint: "If empty, TV shows go to movies folder" },
+      { key: "plex_media_dir", label: "Složka pro filmy", type: "folder", hint: "Cílová složka pro filmy (v Docker kontejneru)" },
+      { key: "tv_media_dir", label: "Složka pro seriály", type: "folder", hint: "Pokud prázdné, seriály se stahují do složky pro filmy" },
     ],
   },
   {
-    title: "Aria2",
+    title: "Aria2 (přímé stahování)",
     icon: "⬇️",
     fields: [
-      { key: "aria2_rpc_url", label: "RPC URL", type: "text", hint: "Default: http://aria2:6800/jsonrpc" },
+      { key: "aria2_rpc_url", label: "RPC URL", type: "text", hint: "Výchozí: http://aria2:6800/jsonrpc" },
       { key: "aria2_rpc_secret", label: "RPC Secret", type: "password" },
     ],
   },
   {
-    title: "qBittorrent",
+    title: "qBittorrent (torrenty)",
     icon: "🧲",
     fields: [
-      { key: "qbittorrent_url", label: "URL", type: "text" },
+      { key: "qbittorrent_url", label: "URL", type: "text", hint: "Např. http://qbittorrent:8080" },
       { key: "qbittorrent_username", label: "Username", type: "text" },
       { key: "qbittorrent_password", label: "Password", type: "password" },
     ],
   },
+];
+
+const SEARCH_SECTIONS = [
   {
-    title: "Search",
+    title: "Vyhledávání",
     icon: "🔍",
     fields: [
-      { key: "min_relevance_score", label: "Min Relevance Score", type: "range", hint: "Filter results by AI score (0-100)" },
+      { key: "min_relevance_score", label: "Minimální skóre relevance", type: "range", hint: "Soubory s nižším skóre se nezobrazí (0 = vše, 100 = pouze perfektní shoda)" },
     ],
   },
+];
+
+type SettingsTab = "obecne" | "vyhledavani" | "automatizace" | "zdroje";
+
+const TABS: { key: SettingsTab; label: string }[] = [
+  { key: "obecne", label: "Obecné" },
+  { key: "vyhledavani", label: "Vyhledávání" },
+  { key: "automatizace", label: "Automatizace" },
+  { key: "zdroje", label: "Zdroje" },
 ];
 
 export default function SettingsPage() {
@@ -139,6 +151,7 @@ export default function SettingsPage() {
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
+  const [activeTab, setActiveTab] = useState<SettingsTab>("obecne");
   const [allLanguages, setAllLanguages] = useState<LanguageOption[]>([]);
   const [browsingField, setBrowsingField] = useState<string | null>(null);
 
@@ -194,97 +207,140 @@ export default function SettingsPage() {
     }
   }
 
+  function renderSettingsSections(sections: typeof GENERAL_SECTIONS) {
+    return sections.map((section) => (
+      <div key={section.title} className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 space-y-4">
+        <h3 className="text-sm font-medium text-zinc-300 flex items-center gap-2"><span>{section.icon}</span>{section.title}</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {section.fields.map((field) => (
+            <div key={field.key}>
+              <label className="block text-xs text-zinc-500 mb-1">{field.label}</label>
+              {field.type === "folder" ? (
+                <div className="flex gap-2">
+                  <input type="text" value={settings[field.key] || ""} onChange={(e) => handleSettingChange(field.key, e.target.value)}
+                    className="flex-1 rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none" />
+                  <button type="button" onClick={() => setBrowsingField(field.key)} className="rounded bg-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-600 transition-colors">Procházet</button>
+                </div>
+              ) : field.type === "range" ? (
+                <div className="flex items-center gap-3">
+                  <input type="range" min="0" max="100" step="5" value={settings[field.key] || "0"}
+                    onChange={(e) => handleSettingChange(field.key, e.target.value)}
+                    className="flex-1 accent-violet-500" />
+                  <span className="text-sm text-zinc-300 w-8 text-right">{settings[field.key] || "0"}</span>
+                </div>
+              ) : (
+                <input type={field.type === "password" ? "password" : "text"} value={settings[field.key] || ""} onChange={(e) => handleSettingChange(field.key, e.target.value)}
+                  className="w-full rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none" />
+              )}
+              {field.hint && <p className="text-[10px] text-zinc-600 mt-1">{field.hint}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+    ));
+  }
+
+  function renderSaveButton() {
+    return (
+      <div className="flex justify-end gap-3">
+        {settingsSaved && <span className="text-green-400 text-sm self-center">✓ Uloženo</span>}
+        <button onClick={handleSettingsSave} disabled={settingsSaving || !settingsDirty}
+          className={`rounded px-6 py-2 text-sm font-bold text-white transition-colors shadow-lg shadow-violet-900/20 ${
+            settingsDirty ? "bg-violet-600 hover:bg-violet-500" : "bg-zinc-700 cursor-not-allowed"
+          }`}>
+          {settingsSaving ? "Ukládám..." : "Uložit vše"}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <main className="flex flex-col items-center gap-8 px-4 py-12 max-w-4xl mx-auto">
       <div className="flex items-center gap-4 w-full">
-        <Link href="/" className="text-zinc-500 hover:text-zinc-300 transition-colors text-sm">&larr; Back</Link>
-        <h1 className="text-2xl font-bold text-zinc-100">Settings</h1>
+        <Link href="/" className="text-zinc-500 hover:text-zinc-300 transition-colors text-sm">&larr; Hledat</Link>
+        <h1 className="text-2xl font-bold text-zinc-100">Nastavení</h1>
       </div>
 
-      <section className="w-full space-y-6">
-        <h2 className="text-lg font-semibold text-zinc-200 border-b border-zinc-800 pb-2">General Configuration</h2>
-        {settingsLoading ? <p className="text-zinc-500">Loading...</p> : (
-          <div className="space-y-4">
-            {SETTINGS_SECTIONS.map((section) => (
-              <div key={section.title} className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 space-y-4">
-                <h3 className="text-sm font-medium text-zinc-300 flex items-center gap-2"><span>{section.icon}</span>{section.title}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {section.fields.map((field) => (
-                    <div key={field.key}>
-                      <label className="block text-xs text-zinc-500 mb-1">{field.label}</label>
-                      {field.type === "folder" ? (
-                        <div className="flex gap-2">
-                          <input type="text" value={settings[field.key] || ""} onChange={(e) => handleSettingChange(field.key, e.target.value)}
-                            className="flex-1 rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none" />
-                          <button type="button" onClick={() => setBrowsingField(field.key)} className="rounded bg-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-600 transition-colors">Browse</button>
-                        </div>
-                      ) : (
-                        <input type={field.type === "password" ? "password" : "text"} value={settings[field.key] || ""} onChange={(e) => handleSettingChange(field.key, e.target.value)}
-                          className="w-full rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none" />
-                      )}
-                      {field.hint && <p className="text-[10px] text-zinc-600 mt-1">{field.hint}</p>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-            <div className="flex justify-end">
-              <button onClick={handleSettingsSave} disabled={!settingsDirty || settingsSaving} className="rounded bg-violet-600 px-6 py-2 text-sm font-bold text-white hover:bg-violet-500 transition-colors disabled:opacity-40">
-                {settingsSaving ? "Saving..." : "Save All"}
-              </button>
+      {/* Tabs */}
+      <div className="flex gap-1 bg-zinc-900 rounded-lg p-1 w-full border border-zinc-800">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              activeTab === t.key
+                ? "bg-violet-600 text-white shadow"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* === Tab: Obecné === */}
+      {activeTab === "obecne" && (
+        <section className="w-full space-y-4">
+          {settingsLoading ? <p className="text-zinc-500">Načítám...</p> : (
+            <div className="space-y-4">
+              {renderSettingsSections(GENERAL_SECTIONS)}
+              {renderSaveButton()}
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      )}
 
-      {/* ========== LANGUAGES ========== */}
-      <section className="w-full space-y-4">
-        <h2 className="text-lg font-semibold text-zinc-200 border-b border-zinc-800 pb-2">
-          Preferred Languages
-        </h2>
-        <p className="text-sm text-zinc-500">
-          Select languages for dubbing detection and TMDB metadata. The search dropdown lets you filter by a specific language.
-        </p>
-        {allLanguages.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {allLanguages.map((lang) => {
-              const enabledCodes = (settings.languages || "cs").split(",").map((c) => c.trim()).filter(Boolean);
-              const isSelected = enabledCodes.includes(lang.code);
-              return (
-                <button
-                  key={lang.code}
-                  onClick={() => {
-                    let next: string[];
-                    if (isSelected) {
-                      next = enabledCodes.filter((c) => c !== lang.code);
-                    } else {
-                      next = [...enabledCodes, lang.code];
-                    }
-                    if (next.length === 0) next = ["cs"];
-                    handleSettingChange("languages", next.join(","));
-                  }}
-                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                    isSelected
-                      ? "bg-violet-600 text-white"
-                      : "bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
-                  }`}
-                >
-                  {FLAG[lang.code] || ""} {lang.label} <span className="opacity-60">{lang.name}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {settingsDirty && (
-          <p className="text-xs text-amber-400">
-            Don&apos;t forget to save settings above.
-          </p>
-        )}
-      </section>
+      {/* === Tab: Vyhledávání === */}
+      {activeTab === "vyhledavani" && (
+        <section className="w-full space-y-4">
+          {settingsLoading ? <p className="text-zinc-500">Načítám...</p> : (
+            <div className="space-y-4">
+              {renderSettingsSections(SEARCH_SECTIONS)}
 
-      <section className="w-full space-y-4">
-        <h2 className="text-lg font-semibold text-zinc-200 border-b border-zinc-800 pb-2">Automations & Integrations</h2>
-        <div className="w-full space-y-3">
+              {/* Languages */}
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 space-y-4">
+                <h3 className="text-sm font-medium text-zinc-300 flex items-center gap-2"><span>🌍</span>Preferované jazyky</h3>
+                <p className="text-[10px] text-zinc-600">Vyber jazyky pro detekci dabingu a TMDB metadata. Dropdown ve vyhledávání filtruje podle konkrétního jazyka.</p>
+                {allLanguages.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {allLanguages.map((lang) => {
+                      const enabledCodes = (settings.languages || "cs").split(",").map((c) => c.trim()).filter(Boolean);
+                      const isSelected = enabledCodes.includes(lang.code);
+                      return (
+                        <button
+                          key={lang.code}
+                          onClick={() => {
+                            let next: string[];
+                            if (isSelected) {
+                              next = enabledCodes.filter((c) => c !== lang.code);
+                            } else {
+                              next = [...enabledCodes, lang.code];
+                            }
+                            handleSettingChange("languages", next.join(","));
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                            isSelected
+                              ? "bg-violet-600/20 border-violet-500 text-violet-300"
+                              : "bg-zinc-800 border-zinc-700 text-zinc-500 hover:border-zinc-600"
+                          }`}
+                        >
+                          {FLAG[lang.code] || ""} {lang.label} <span className="opacity-60">{lang.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {renderSaveButton()}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* === Tab: Automatizace === */}
+      {activeTab === "automatizace" && (
+        <section className="w-full space-y-4">
           {integrations.map((int) => (
             <div key={int.type} className="flex items-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
               <button onClick={async () => { await updateIntegration(int.type, { enabled: !int.enabled }); loadIntegrations(); }}
@@ -295,18 +351,19 @@ export default function SettingsPage() {
                 <span className="text-zinc-100 font-medium">{int.name}</span>
                 <span className="ml-2 text-xs text-zinc-500 uppercase">{int.type}</span>
               </div>
-              <button onClick={() => setEditIntegrationType(int.type)} className="text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 px-3 py-1 rounded hover:bg-zinc-800 transition-colors">Edit</button>
+              <button onClick={() => setEditIntegrationType(int.type)} className="text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 px-3 py-1 rounded hover:bg-zinc-800 transition-colors">Upravit</button>
             </div>
           ))}
-        </div>
-      </section>
+          {integrations.length === 0 && <p className="text-zinc-500 text-sm">Žádné integrace</p>}
+        </section>
+      )}
 
-      <section className="w-full space-y-4">
-        <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-          <h2 className="text-lg font-semibold text-zinc-200">File Sources</h2>
-          <button onClick={() => setShowAdd(true)} className="rounded bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors">+ Add Source</button>
-        </div>
-        <div className="w-full space-y-3">
+      {/* === Tab: Zdroje === */}
+      {activeTab === "zdroje" && (
+        <section className="w-full space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => setShowAdd(true)} className="rounded bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors">+ Přidat zdroj</button>
+          </div>
           {sources.map((source) => (
             <div key={source.id} className="flex items-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
               <button onClick={async () => { await updateSource(source.id, { enabled: !source.enabled }); loadSources(); }}
@@ -319,14 +376,16 @@ export default function SettingsPage() {
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={() => handleTest(source.id)} className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors">
-                  {testResults[source.id] === null ? "..." : testResults[source.id] === true ? "OK" : testResults[source.id] === false ? "Error" : "Test"}
+                  {testResults[source.id] === null ? "..." : testResults[source.id] === true ? "OK" : testResults[source.id] === false ? "Chyba" : "Test"}
                 </button>
-                <button onClick={() => setEditId(source.id)} className="text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 px-3 py-1 rounded hover:bg-zinc-800 transition-colors">Edit</button>
+                <button onClick={() => setEditId(source.id)} className="text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 px-3 py-1 rounded hover:bg-zinc-800 transition-colors">Upravit</button>
+                <button onClick={async () => { if (confirm("Opravdu smazat tento zdroj?")) { await deleteSource(source.id); await loadSources(); } }} className="text-xs text-red-500 hover:text-red-400 transition-colors">Smazat</button>
               </div>
             </div>
           ))}
-        </div>
-      </section>
+          {sources.length === 0 && <p className="text-zinc-500 text-sm">Žádné zdroje — přidej WebShare, FastShare nebo Jackett</p>}
+        </section>
+      )}
 
       {showAdd && (
         <AddSourceModal
@@ -376,7 +435,7 @@ function AddSourceModal({ onClose, onSave }: { onClose: () => void, onSave: (dat
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
-        <h2 className="text-xl font-bold text-zinc-100">Add Source</h2>
+        <h2 className="text-xl font-bold text-zinc-100">Přidat zdroj</h2>
         <div className="mt-6 space-y-4">
           <div>
             <label className="block text-xs text-zinc-500 mb-1">Type</label>
@@ -396,10 +455,10 @@ function AddSourceModal({ onClose, onSave }: { onClose: () => void, onSave: (dat
         </div>
         <div className="mt-8 flex justify-end gap-3">
           <button onClick={handleTest} className="px-4 py-2 text-sm text-zinc-400 border border-zinc-800 rounded hover:bg-zinc-800 transition-colors">
-            {testing === "loading" ? "Testing..." : testing === true ? "OK" : testing === false ? "Failed" : "Test Connection"}
+            {testing === "loading" ? "Testuji..." : testing === true ? "OK" : testing === false ? "Chyba" : "Test spojení"}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
-          <button onClick={() => onSave({ type, name, config })} className="rounded bg-violet-600 px-6 py-2 text-sm font-bold text-white hover:bg-violet-500 transition-colors shadow-lg shadow-violet-900/20">Add</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Zrušit</button>
+          <button onClick={() => onSave({ type, name, config })} className="rounded bg-violet-600 px-6 py-2 text-sm font-bold text-white hover:bg-violet-500 transition-colors shadow-lg shadow-violet-900/20">Přidat</button>
         </div>
       </div>
     </div>
@@ -448,12 +507,12 @@ function EditIntegrationModal({ type, integration, onClose, onSave }: { type: st
                 {f.type === "select" ? (
                   <select value={config[f.key] || ""} onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })}
                     className="w-full rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none">
-                    <option value="">-- Select --</option>
+                    <option value="">-- Vybrat --</option>
                     {f.option_key === "root_folders" && options.root_folders?.map((opt: any) => (<option key={opt.id} value={opt.path}>{opt.path}</option>))}
                     {f.option_key === "quality_profiles" && options.quality_profiles?.map((opt: any) => (<option key={opt.id} value={opt.id}>{opt.name}</option>))}
                   </select>
                 ) : f.type === "checkbox" ? (
-                  <div className="flex items-center gap-2 py-1"><input type="checkbox" checked={config[f.key] === "true"} onChange={(e) => setConfig({ ...config, [f.key]: e.target.checked ? "true" : "false" })} className="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-violet-600" /><span className="text-sm text-zinc-300">Enabled</span></div>
+                  <div className="flex items-center gap-2 py-1"><input type="checkbox" checked={config[f.key] === "true"} onChange={(e) => setConfig({ ...config, [f.key]: e.target.checked ? "true" : "false" })} className="w-4 h-4 rounded border-zinc-700 bg-zinc-800 text-violet-600" /><span className="text-sm text-zinc-300">Zapnuto</span></div>
                 ) : f.type === "folder" ? (
                   <div className="flex gap-2"><input type="text" value={config[f.key] || ""} onChange={(e) => setConfig({ ...config, [f.key]: e.target.value })} className="flex-1 rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none" /><button type="button" onClick={() => setBrowsingField(f.key)} className="rounded bg-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-600 transition-colors">Browse</button></div>
                 ) : (
@@ -471,8 +530,8 @@ function EditIntegrationModal({ type, integration, onClose, onSave }: { type: st
             {loadingOptions && <p className="text-xs text-violet-400 animate-pulse">Fetching options from Radarr API...</p>}
           </div>
           <div className="mt-8 flex justify-end gap-3">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
-            <button onClick={() => onSave(config)} className="rounded bg-violet-600 px-6 py-2 text-sm font-bold text-white hover:bg-violet-500 transition-colors shadow-lg shadow-violet-900/20">Save</button>
+            <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Zrušit</button>
+            <button onClick={() => onSave(config)} className="rounded bg-violet-600 px-6 py-2 text-sm font-bold text-white hover:bg-violet-500 transition-colors shadow-lg shadow-violet-900/20">Uložit</button>
           </div>
         </div>
       </div>
@@ -499,7 +558,7 @@ function EditSourceModal({ source, onClose, onSave }: { source: Source, onClose:
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
-        <h2 className="text-xl font-bold text-zinc-100">Edit {source.name}</h2>
+        <h2 className="text-xl font-bold text-zinc-100">Upravit {source.name}</h2>
         <div className="mt-6 space-y-4">
           <div><label className="block text-xs text-zinc-500 mb-1">Name</label><input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none" /></div>
           {typeDef?.fields.map((f) => (
@@ -512,10 +571,10 @@ function EditSourceModal({ source, onClose, onSave }: { source: Source, onClose:
         </div>
         <div className="mt-8 flex justify-end gap-3">
           <button onClick={handleTest} className="px-4 py-2 text-sm text-zinc-400 border border-zinc-800 rounded hover:bg-zinc-800 transition-colors">
-            {testing === "loading" ? "Testing..." : testing === true ? "OK" : testing === false ? "Failed" : "Test Connection"}
+            {testing === "loading" ? "Testuji..." : testing === true ? "OK" : testing === false ? "Chyba" : "Test spojení"}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
-          <button onClick={() => onSave({ name, config })} className="rounded bg-violet-600 px-6 py-2 text-sm font-bold text-white shadow-lg shadow-violet-900/20">Save</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Zrušit</button>
+          <button onClick={() => onSave({ name, config })} className="rounded bg-violet-600 px-6 py-2 text-sm font-bold text-white shadow-lg shadow-violet-900/20">Uložit</button>
         </div>
       </div>
     </div>
