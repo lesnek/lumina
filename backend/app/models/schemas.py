@@ -30,6 +30,7 @@ class TMDBMovie(BaseModel):
     year: str
     overview: str
     poster_url: str | None
+    media_type: str = "movie"  # "movie" or "tv"
 
 
 class ScorableFile(BaseModel):

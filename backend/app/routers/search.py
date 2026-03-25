@@ -18,12 +18,25 @@ router = APIRouter(prefix="/api", tags=["search"])
 @router.get("/search/movies", response_model=list[TMDBMovie])
 async def search_movies(query: str, language: str | None = None) -> list[TMDBMovie]:
     cfg = await get_effective_settings()
-    # Use explicit language param, or first configured language, or cs
     lang_code = language or cfg.get("languages", "cs").split(",")[0].strip()
-    tmdb_locale = f"{lang_code}-{lang_code.upper()}"  # cs -> cs-CZ, en -> en-EN, etc.
+    tmdb_locale = f"{lang_code}-{lang_code.upper()}"
     client = TMDBClient(cfg["tmdb_api_key"])
     try:
-        return await client.search_movie(query, language=tmdb_locale)
+        movies, shows = await asyncio.gather(
+            client.search_movie(query, language=tmdb_locale),
+            client.search_tv(query, language=tmdb_locale),
+        )
+        # Interleave: movie, tv, movie, tv... then append remaining
+        merged: list[TMDBMovie] = []
+        mi, ti = 0, 0
+        while mi < len(movies) or ti < len(shows):
+            if mi < len(movies):
+                merged.append(movies[mi])
+                mi += 1
+            if ti < len(shows):
+                merged.append(shows[ti])
+                ti += 1
+        return merged[:20]
     finally:
         await client.close()
 

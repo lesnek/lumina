@@ -186,6 +186,7 @@ function HomeContent() {
             tmdb_id={selectedMovie?.tmdb_id}
             title={selectedMovie?.title}
             year={parseInt(selectedMovie?.year || "0")}
+            mediaType={selectedMovie?.media_type || "movie"}
               files={files}
               loading={filesLoading}
               onDownloadStarted={() => setResultsCollapsed(true)}

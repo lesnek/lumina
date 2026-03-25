@@ -9,6 +9,7 @@ interface Props {
   tmdb_id?: number;
   title?: string;
   year?: number;
+  mediaType?: "movie" | "tv";
   onDownloadStarted?: () => void;
 }
 
@@ -45,13 +46,13 @@ function sourceLink(file: ScoredFile): string | null {
   return null;
 }
 
-export default function FileTable({ files, loading, onDownloadStarted, tmdb_id, title, year }: Props) {
+export default function FileTable({ files, loading, onDownloadStarted, tmdb_id, title, year, mediaType }: Props) {
   const [downloading, setDownloading] = useState<Record<string, string>>({});
 
   async function handleDownload(file: ScoredFile) {
     setDownloading((prev) => ({ ...prev, [file.ident]: "starting" }));
     try {
-      const result = await startDownload(file, undefined, tmdb_id, title, year);
+      const result = await startDownload(file, undefined, tmdb_id, title, year, mediaType || "movie");
       const id = result.gid || result.hash || "ok";
       setDownloading((prev) => ({ ...prev, [file.ident]: id }));
       onDownloadStarted?.();

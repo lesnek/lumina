@@ -7,6 +7,7 @@ export interface TMDBMovie {
   year: string;
   overview: string;
   poster_url: string | null;
+  media_type?: "movie" | "tv";
 }
 
 export interface ScoredFile {

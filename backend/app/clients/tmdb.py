@@ -26,6 +26,18 @@ class TMDBClient:
         resp.raise_for_status()
         return await self._parse_movies(resp.json().get("results", []), limit=12)
 
+    async def search_tv(self, title: str, language: str = "cs-CZ") -> list[TMDBMovie]:
+        resp = await self._http.get(
+            f"{API_BASE}/search/tv",
+            params={
+                "api_key": self._api_key,
+                "query": title,
+                "language": language,
+            },
+        )
+        resp.raise_for_status()
+        return await self._parse_tv(resp.json().get("results", []), limit=12)
+
     async def _parse_movies(self, items: list, limit: int = 20) -> list[TMDBMovie]:
         movies: list[TMDBMovie] = []
         for item in items[:limit]:
@@ -39,6 +51,7 @@ class TMDBClient:
                     year=release[:4] if len(release) >= 4 else "",
                     overview=item.get("overview", ""),
                     poster_url=f"{IMG_BASE}{poster_path}" if poster_path else None,
+                    media_type="movie",
                 )
             )
         return movies
@@ -119,6 +132,7 @@ class TMDBClient:
                     year=air_date[:4] if len(air_date) >= 4 else "",
                     overview=item.get("overview", ""),
                     poster_url=f"{IMG_BASE}{poster_path}" if poster_path else None,
+                    media_type="tv",
                 )
             )
         return shows
