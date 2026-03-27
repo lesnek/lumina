@@ -180,20 +180,21 @@ async def search_files(
             return []
 
     async def _search_with_fallback(source) -> list[SearchResult]:
-        """Search with main query; for torrent sources also try alt queries and merge."""
+        """Search with main query; for torrent sources try alt queries if empty."""
         results = await _safe_search(source, query)
-        if source.source_type != SourceType.JACKETT or not alt_queries:
+        if results or source.source_type != SourceType.JACKETT:
             return results
-        # Jackett: always try alt queries too and merge (translated titles miss results)
-        seen_idents: set[str] = {r.ident for r in results}
+        # Jackett: try alternative queries
+        seen_idents: set[str] = set()
         for alt_q in alt_queries:
             alt_results = await _safe_search(source, alt_q)
             for r in alt_results:
                 if r.ident not in seen_idents:
                     seen_idents.add(r.ident)
                     results.append(r)
-            logger.info("Jackett alt '%s': +%d new (total %d)",
-                        alt_q, len(alt_results), len(results))
+            if results:
+                logger.info("Jackett fallback '%s' found %d results", alt_q, len(results))
+                break
         return results
 
     tasks = [_search_with_fallback(s) for s in sources]
