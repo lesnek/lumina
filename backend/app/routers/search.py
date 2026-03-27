@@ -147,6 +147,7 @@ async def search_files(
     query: str,
     language: str | None = None,
     original_title: str | None = None,
+    user_query: str | None = None,
 ) -> list[ScoredFile]:
     cfg = await get_effective_settings()
     sources = SourceRegistry.get().sources
@@ -160,6 +161,9 @@ async def search_files(
         languages = [language]
 
     alt_queries = _build_alt_queries(query, original_title or "")
+    # User's original search term is often the best fallback (e.g. "jojo" for anime)
+    if user_query and user_query.lower() not in [q.lower() for q in [query] + alt_queries]:
+        alt_queries.insert(0, user_query)
     if alt_queries:
         logger.info("Alt queries for '%s': %s", query, alt_queries)
 
