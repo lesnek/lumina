@@ -47,7 +47,6 @@ function HomeContent() {
   }, [router]);
 
   const [searchLang, setSearchLang] = useState<string | undefined>(undefined);
-  const [userQuery, setUserQuery] = useState("");
 
   // Handle incoming movie from Discover page — go straight to file search
   const handleDiscoverMovie = useCallback(async (movie: TMDBMovie) => {
@@ -89,7 +88,6 @@ function HomeContent() {
     setResultsCollapsed(false);
     setMoviesLoading(true);
     setSearchLang(language);
-    setUserQuery(query);
     try {
       const results = await searchMovies(query, language);
       setMovies(results);
@@ -109,7 +107,7 @@ function HomeContent() {
       const query = movie.year
         ? `${movie.title} ${movie.year}`
         : movie.title;
-      const results = await searchFiles(query, searchLang, movie.original_title, userQuery);
+      const results = await searchFiles(query, searchLang, movie.original_title);
       setFiles(results);
     } catch (e) {
       setError(e instanceof Error ? e.message : "File search error");
