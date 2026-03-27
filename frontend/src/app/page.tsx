@@ -59,7 +59,7 @@ function HomeContent() {
       const query = movie.year
         ? `${movie.title} ${movie.year}`
         : movie.title;
-      const results = await searchFiles(query);
+      const results = await searchFiles(query, undefined, movie.original_title);
       setFiles(results);
     } catch (e) {
       setError(e instanceof Error ? e.message : "File search error");
@@ -107,7 +107,7 @@ function HomeContent() {
       const query = movie.year
         ? `${movie.title} ${movie.year}`
         : movie.title;
-      const results = await searchFiles(query, searchLang);
+      const results = await searchFiles(query, searchLang, movie.original_title);
       setFiles(results);
     } catch (e) {
       setError(e instanceof Error ? e.message : "File search error");

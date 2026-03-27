@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 from fastapi import APIRouter
 
@@ -7,7 +8,7 @@ from app.config import get_effective_settings
 from app.clients.tmdb import TMDBClient
 from app.clients.groq_scorer import score_results, _fallback_scoring
 from app.models.schemas import TMDBMovie, ScoredFile, ScorableFile
-from app.sources.base import SearchResult
+from app.sources.base import SearchResult, SourceType
 from app.sources.registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,29 @@ async def discover_popular(language: str | None = None) -> list[TMDBMovie]:
         await client.close()
 
 
+def _clean_query(query: str) -> str:
+    """Strip year, apostrophes, special chars for better torrent search."""
+    clean = re.sub(r"[''ʼ]s?\b", "", query)   # apostrophe + optional s
+    clean = re.sub(r"\b\d{4}\b", "", clean)    # year
+    clean = re.sub(r"[^\w\s]", " ", clean)     # special chars
+    clean = re.sub(r"\s+", " ", clean).strip()  # normalize spaces
+    return clean
+
+
+def _build_alt_queries(query: str, original_title: str = "") -> list[str]:
+    """Build alternative queries for torrent search fallback."""
+    alts: list[str] = []
+    cleaned = _clean_query(query)
+    if cleaned and cleaned.lower() != query.lower():
+        alts.append(cleaned)
+    if original_title and original_title.lower() != query.lower():
+        alts.append(original_title)
+        cleaned_orig = _clean_query(original_title)
+        if cleaned_orig and cleaned_orig.lower() != original_title.lower():
+            alts.append(cleaned_orig)
+    return alts
+
+
 def _to_scorable(results: list[SearchResult]) -> list[ScorableFile]:
     """Convert unified SearchResults into ScorableFiles for the scorer."""
     return [
@@ -119,7 +143,11 @@ def _to_scorable(results: list[SearchResult]) -> list[ScorableFile]:
 
 
 @router.get("/search/files", response_model=list[ScoredFile])
-async def search_files(query: str, language: str | None = None) -> list[ScoredFile]:
+async def search_files(
+    query: str,
+    language: str | None = None,
+    original_title: str | None = None,
+) -> list[ScoredFile]:
     cfg = await get_effective_settings()
     sources = SourceRegistry.get().sources
     if not sources:
@@ -130,6 +158,10 @@ async def search_files(query: str, language: str | None = None) -> list[ScoredFi
     # If explicit language filter, only use that one for scoring
     if language:
         languages = [language]
+
+    alt_queries = _build_alt_queries(query, original_title or "")
+    if alt_queries:
+        logger.info("Alt queries for '%s': %s", query, alt_queries)
 
     async def _safe_search(source, q: str) -> list[SearchResult]:
         try:
@@ -143,7 +175,25 @@ async def search_files(query: str, language: str | None = None) -> list[ScoredFi
             )
             return []
 
-    tasks = [_safe_search(s, query) for s in sources]
+    async def _search_with_fallback(source) -> list[SearchResult]:
+        """Search with main query; for torrent sources try alt queries if empty."""
+        results = await _safe_search(source, query)
+        if results or source.source_type != SourceType.JACKETT:
+            return results
+        # Jackett: try alternative queries
+        seen_idents: set[str] = set()
+        for alt_q in alt_queries:
+            alt_results = await _safe_search(source, alt_q)
+            for r in alt_results:
+                if r.ident not in seen_idents:
+                    seen_idents.add(r.ident)
+                    results.append(r)
+            if results:
+                logger.info("Jackett fallback '%s' found %d results", alt_q, len(results))
+                break
+        return results
+
+    tasks = [_search_with_fallback(s) for s in sources]
     results_per_source = await asyncio.gather(*tasks)
 
     all_results: list[SearchResult] = []

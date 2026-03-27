@@ -97,9 +97,10 @@ export async function searchMovies(query: string, language?: string): Promise<TM
   return res.json();
 }
 
-export async function searchFiles(query: string, language?: string): Promise<ScoredFile[]> {
+export async function searchFiles(query: string, language?: string, originalTitle?: string): Promise<ScoredFile[]> {
   const params = new URLSearchParams({ query });
   if (language) params.set("language", language);
+  if (originalTitle && originalTitle !== query) params.set("original_title", originalTitle);
   const res = await fetch(`${API_BASE}/api/search/files?${params}`);
   if (!res.ok) throw new Error(`File search failed: ${res.status}`);
   return res.json();
