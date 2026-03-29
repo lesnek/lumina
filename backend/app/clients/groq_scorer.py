@@ -281,7 +281,7 @@ def _fallback_scoring(
     for i, f in enumerate(files):
         name_lower = f.name.lower()
         ext = "." + name_lower.rsplit(".", 1)[-1] if "." in name_lower else ""
-        is_video = ext in video_exts or f.source == "jackett"
+        is_video = ext in video_exts or f.source in ("jackett", "webshare", "fastshare")
         is_lang = any(tag in name_lower for tag in all_tags)
 
         quality = "unknown"
@@ -290,9 +290,11 @@ def _fallback_scoring(
                 quality = q.upper() if q == "4k" else q
                 break
 
-        score = 70 if is_video else 10
-        if f.seeders is not None and f.seeders > 5:
+        score = 75 if is_video else 10
+        if is_lang:
             score = min(100, score + 10)
+        if f.seeders is not None and f.seeders > 5:
+            score = min(100, score + 5)
 
         results.append(
             ScoredFile(
