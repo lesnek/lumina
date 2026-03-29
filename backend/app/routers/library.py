@@ -183,7 +183,7 @@ def _scan_video_files(directory: str) -> list[dict]:
     files = []
     if not os.path.isdir(directory):
         return files
-    for root, _dirs, filenames in os.walk(directory):
+    for root, _dirs, filenames in os.walk(directory, followlinks=True):
         for fname in filenames:
             ext = os.path.splitext(fname)[1].lower()
             if ext not in VIDEO_EXTS:
