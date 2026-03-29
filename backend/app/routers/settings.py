@@ -15,6 +15,7 @@ DEFAULTS = {
     "aria2_rpc_url": "http://aria2:6800/jsonrpc",
     "aria2_rpc_secret": "your_aria2_secret",
     "plex_media_dir": "/downloads/plex",
+    "tv_media_dir": "",
     "qbittorrent_url": "",
     "qbittorrent_username": "admin",
     "qbittorrent_password": "",
