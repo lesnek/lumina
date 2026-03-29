@@ -194,7 +194,10 @@ async def search_files(
 
     async def _safe_search(source, q: str) -> list[SearchResult]:
         try:
-            return await source.search(q)
+            results = await source.search(q)
+            logger.info("Source %s search '%s' → %d results",
+                        source.source_type.value, q[:40], len(results))
+            return results
         except Exception as e:
             logger.warning(
                 "Source %s (id=%d) search '%s' failed: %s",
@@ -212,6 +215,9 @@ async def search_files(
         else:
             # DDL: just main query (CZ title + year)
             tasks.append(_safe_search(source, query))
+    logger.info("Dispatching %d search tasks across %d sources (%s)",
+                len(tasks), len(sources),
+                ", ".join(f"{s.source_type.value}:{s.source_id}" for s in sources))
     results_per_task = await asyncio.gather(*tasks)
 
     # Merge and deduplicate by ident
