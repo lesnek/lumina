@@ -96,6 +96,19 @@ async def scan_library():
     stats = {"movies_found": 0, "movies_matched": 0, "shows_found": 0, "episodes_matched": 0}
 
     try:
+        # --- Cleanup: remove DB entries where file no longer exists ---
+        cursor = await db.execute("SELECT id, file_path FROM library_movies")
+        for row in await cursor.fetchall():
+            if not os.path.exists(row[1]):
+                await db.execute("DELETE FROM library_movies WHERE id = ?", (row[0],))
+        cursor = await db.execute("SELECT id, file_path FROM library_episodes WHERE has_file = 1")
+        for row in await cursor.fetchall():
+            if not os.path.exists(row[1]):
+                await db.execute("UPDATE library_episodes SET has_file = 0, file_path = NULL, filename = NULL WHERE id = ?", (row[0],))
+        # Remove shows with zero episodes
+        await db.execute("DELETE FROM library_shows WHERE tmdb_id NOT IN (SELECT DISTINCT show_tmdb_id FROM library_episodes WHERE has_file = 1)")
+        await db.commit()
+
         # --- Scan movies ---
         if movie_dir:
             movie_files = _scan_video_files(movie_dir)
