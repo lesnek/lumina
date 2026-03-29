@@ -10,6 +10,7 @@ from app.config import get_effective_settings
 from app.clients.aria2 import Aria2Client
 from app.clients.qbittorrent import QBittorrentClient
 from app.clients.radarr import RadarrClient
+from app.clients.sonarr import SonarrClient
 from app.utils.media import get_media_tags, format_filename
 
 logger = logging.getLogger("app.tasks")
@@ -35,25 +36,26 @@ def get_local_automations_sync():
             for r in rows
         ]
 
-async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: int, local_path: str):
-    """Run Renamer and Radarr workflows based on enabled automations."""
+async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: int, local_path: str, content_type: str = "movie"):
+    """Run Renamer and Radarr/Sonarr workflows based on enabled automations."""
     automations = get_local_automations_sync()
     radarr_cfg = next((a for a in automations if a["type"] == "radarr"), None)
+    sonarr_cfg = next((a for a in automations if a["type"] == "sonarr"), None)
     renamer_cfg = next((a for a in automations if a["type"] == "renamer"), None)
-    
+
     current_path = local_path
-    
+
     # 1. RENAMER
     if renamer_cfg and renamer_cfg.get("enabled"):
         logger.info("Renaming file for: %s", title)
         tags = {}
         if renamer_cfg["config"].get("use_mediainfo") != "false":
             tags = get_media_tags(current_path)
-        
+
         pattern = renamer_cfg["config"].get("format", "")
         new_name = format_filename(current_path, tmdb_id, tags, title, year, pattern)
         new_path = Path(current_path).parent / new_name
-        
+
         try:
             shutil.move(current_path, new_path)
             os.chmod(new_path, 0o664)
@@ -61,8 +63,8 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
         except Exception as e:
             logger.error("Renaming failed for %s: %s", title, e)
 
-    # 2. RADARR
-    if radarr_cfg and radarr_cfg.get("enabled"):
+    # 2. RADARR (movies only)
+    if content_type == "movie" and radarr_cfg and radarr_cfg.get("enabled"):
         cfg = radarr_cfg["config"]
         if cfg.get("api_key") and cfg.get("url"):
             logger.info("Adding movie to Radarr: %s", title)
@@ -71,7 +73,7 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
                 movie = await radarr.get_movie_by_tmdb_id(tmdb_id)
                 if not movie and cfg.get("auto_add") == "true":
                     await radarr.add_movie(tmdb_id, title, year, cfg.get("root_folder", "/data/movies"))
-                
+
                 if cfg.get("blackhole_path"):
                     dest = Path(cfg["blackhole_path"]) / Path(current_path).name
                     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +87,43 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
             finally:
                 await radarr.close()
 
+    # 3. SONARR (TV shows only)
+    if content_type == "tv" and sonarr_cfg and sonarr_cfg.get("enabled"):
+        cfg = sonarr_cfg["config"]
+        if cfg.get("api_key") and cfg.get("url"):
+            logger.info("Processing TV download with Sonarr: %s", title)
+            sonarr = SonarrClient(cfg["url"], cfg["api_key"])
+            try:
+                # Auto-add series if configured
+                if cfg.get("auto_add") == "true":
+                    existing = await sonarr.lookup_series(title)
+                    if existing:
+                        tvdb_id = existing.get("tvdbId", 0)
+                        in_sonarr = await sonarr.get_series_by_tvdb_id(tvdb_id)
+                        if not in_sonarr:
+                            await sonarr.add_series(
+                                title, tvdb_id,
+                                cfg.get("root_folder", "/downloads/tv"),
+                                int(cfg.get("profile_id", "1")),
+                            )
+
+                # Move to blackhole or trigger scan
+                if cfg.get("blackhole_path"):
+                    dest = Path(cfg["blackhole_path"]) / Path(current_path).name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    try: os.chmod(dest.parent, 0o775)
+                    except: pass
+                    shutil.move(current_path, dest)
+                    os.chmod(dest, 0o664)
+                    await sonarr.trigger_import_scan(cfg["blackhole_path"])
+                else:
+                    # No blackhole — just trigger scan on the download dir
+                    await sonarr.trigger_import_scan(str(Path(current_path).parent))
+            except Exception as e:
+                logger.error("Sonarr integration failed for %s: %s", title, e)
+            finally:
+                await sonarr.close()
+
 async def _monitor_loop():
     """Background loop that runs as long as there are unprocessed downloads."""
     global _monitor_running
@@ -96,9 +135,9 @@ async def _monitor_loop():
             with sqlite3.connect(DB_PATH) as conn:
                 conn.row_factory = sqlite3.Row
                 cur = conn.cursor()
-                cur.execute("SELECT id, tmdb_id, title, year, backend FROM download_tracker WHERE processed = 0")
+                cur.execute("SELECT id, tmdb_id, title, year, backend, content_type FROM download_tracker WHERE processed = 0")
                 tracked = cur.fetchall()
-                
+
                 if not tracked:
                     logger.info("No more downloads to process. Stopping monitor.")
                     _monitor_running = False
@@ -106,6 +145,7 @@ async def _monitor_loop():
 
                 for d in tracked:
                     did, tmdb_id, title, year, backend = d["id"], d["tmdb_id"], d["title"], d["year"], d["backend"]
+                    content_type = d["content_type"] if "content_type" in d.keys() else "movie"
                     
                     try:
                         completed_path = None
@@ -128,7 +168,7 @@ async def _monitor_loop():
                         
                         if completed_path and Path(completed_path).exists():
                             logger.info("Download completed: %s. Starting post-processing.", title)
-                            await run_post_processing(did, tmdb_id, title, year, completed_path)
+                            await run_post_processing(did, tmdb_id, title, year, completed_path, content_type)
                             cur.execute("UPDATE download_tracker SET processed = 1, status = 'complete' WHERE id = ?", (did,))
                             conn.commit()
                     except Exception as sub_e:

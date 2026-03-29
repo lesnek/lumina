@@ -66,6 +66,19 @@ const INTEGRATION_TYPES = [
     ],
   },
   {
+    type: "sonarr",
+    label: "Sonarr",
+    icon: "📺",
+    fields: [
+      { key: "api_key", label: "Sonarr API Key", type: "password", hint: "Found in Sonarr -> Settings -> General" },
+      { key: "url", label: "Sonarr URL", type: "text", hint: "e.g. http://sonarr:8989" },
+      { key: "root_folder", label: "Root Folder", type: "select", option_key: "root_folders", hint: "Select target library folder in Sonarr" },
+      { key: "profile_id", label: "Quality Profile", type: "select", option_key: "quality_profiles", hint: "Select quality profile in Sonarr" },
+      { key: "blackhole_path", label: "Blackhole Path", type: "folder", hint: "Folder Sonarr watches for imports" },
+      { key: "auto_add", label: "Auto-add Series", type: "checkbox", hint: "Automatically add missing series to Sonarr" },
+    ],
+  },
+  {
     type: "renamer",
     label: "Renamer (Media Info)",
     icon: "📝",
@@ -475,7 +488,7 @@ function EditIntegrationModal({ type, integration, onClose, onSave }: { type: st
   const DEFAULT_FORMAT = "{title} ({year}) [{source}-{res} {codec}] [{langs}] {tmdb-{id}}";
 
   useEffect(() => {
-    if (type === "radarr") {
+    if (type === "radarr" || type === "sonarr") {
       setLoadingOptions(true);
       getIntegrationOptions(type).then(data => { setOptions(data); setLoadingOptions(false); });
     }

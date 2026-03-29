@@ -22,26 +22,32 @@ async def edit_integration(type_name: str, body: AutomationUpdate):
 
 @router.get("/{type_name}/options")
 async def get_integration_options(type_name: str):
-    if type_name != "radarr":
+    if type_name not in ("radarr", "sonarr"):
         return {}
-    
+
     from app.db import get_automations
-    from app.clients.radarr import RadarrClient
-    
+
     automations = await get_automations()
-    radarr_cfg = next((a for a in automations if a["type"] == "radarr"), None)
-    
-    if not radarr_cfg or not radarr_cfg["config"].get("url"):
+    auto_cfg = next((a for a in automations if a["type"] == type_name), None)
+
+    if not auto_cfg or not auto_cfg["config"].get("url"):
         return {"root_folders": [], "quality_profiles": []}
-        
-    cfg = radarr_cfg["config"]
-    radarr = RadarrClient(cfg["url"], cfg["api_key"])
+
+    cfg = auto_cfg["config"]
+
+    if type_name == "radarr":
+        from app.clients.radarr import RadarrClient
+        client = RadarrClient(cfg["url"], cfg["api_key"])
+    else:
+        from app.clients.sonarr import SonarrClient
+        client = SonarrClient(cfg["url"], cfg["api_key"])
+
     try:
-        folders = await radarr.get_root_folders()
-        profiles = await radarr.get_quality_profiles()
+        folders = await client.get_root_folders()
+        profiles = await client.get_quality_profiles()
         return {
             "root_folders": [{"path": f["path"], "id": f["id"]} for f in folders],
-            "quality_profiles": [{"name": p["name"], "id": p["id"]} for p in profiles]
+            "quality_profiles": [{"name": p["name"], "id": p["id"]} for p in profiles],
         }
     finally:
-        await radarr.close()
+        await client.close()
