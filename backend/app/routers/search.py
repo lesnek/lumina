@@ -199,11 +199,16 @@ async def search_files(
             )
             return []
 
-    # Search ALL sources with ALL query variants in parallel
+    # DDL sources (WebShare, FastShare) get only the main query
+    # Jackett gets ALL query variants (EN title, stripped diacritics, etc.)
     tasks = []
     for source in sources:
-        for q in unique_queries:
-            tasks.append(_safe_search(source, q))
+        if source.source_type == SourceType.JACKETT:
+            for q in unique_queries:
+                tasks.append(_safe_search(source, q))
+        else:
+            # DDL: just main query (CZ title + year)
+            tasks.append(_safe_search(source, query))
     results_per_task = await asyncio.gather(*tasks)
 
     # Merge and deduplicate by ident
