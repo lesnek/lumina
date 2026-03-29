@@ -239,7 +239,7 @@ async def score_results(
         scored_data = json.loads(content)
     except json.JSONDecodeError:
         logger.error("Groq returned invalid JSON: %s", content[:500])
-        return _fallback_scoring(files, languages)
+        return _fallback_scoring(files, languages, query=movie_title)
 
     results: list[ScoredFile] = []
     for entry in scored_data:
@@ -265,9 +265,56 @@ async def score_results(
     return results
 
 
+def _normalize(text: str) -> str:
+    """Normalize text for comparison: strip diacritics, lowercase, remove special chars."""
+    import unicodedata, re
+    nfkd = unicodedata.normalize("NFKD", text)
+    ascii_text = nfkd.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^\w\s]", " ", ascii_text.lower()).strip()
+
+
+def _title_match_score(query: str, filename: str) -> int:
+    """Score how well filename matches the search query (0-100)."""
+    q_norm = _normalize(query)
+    f_norm = _normalize(filename)
+    q_words = set(q_norm.split())
+    f_words = set(f_norm.split())
+
+    if not q_words:
+        return 50
+
+    # How many query words appear in filename
+    matched = q_words & f_words
+    ratio = len(matched) / len(q_words)
+
+    # Strip year from query for title-only matching
+    import re
+    q_no_year = re.sub(r"\b(19|20)\d{2}\b", "", q_norm).strip()
+    q_title_words = set(q_no_year.split())
+
+    if q_title_words:
+        title_matched = q_title_words & f_words
+        title_ratio = len(title_matched) / len(q_title_words)
+    else:
+        title_ratio = ratio
+
+    # Full title match bonus
+    if title_ratio >= 0.9:
+        return 95
+    elif title_ratio >= 0.7:
+        return 85
+    elif title_ratio >= 0.5:
+        return 70
+    elif ratio >= 0.3:
+        return 50
+    else:
+        return 20
+
+
 def _fallback_scoring(
     files: list[ScorableFile],
     languages: list[str] | None = None,
+    query: str = "",
 ) -> list[ScoredFile]:
     """Basic heuristic scoring when AI is unavailable."""
     video_exts = {".mkv", ".avi", ".mp4", ".m4v", ".ts"}
@@ -282,7 +329,6 @@ def _fallback_scoring(
         all_tags = {"cz", "czech", "český", "dabing"}
 
     results: list[ScoredFile] = []
-    # Use enumerate because ScorableFile model does not have an index attribute
     for i, f in enumerate(files):
         name_lower = f.name.lower()
         ext = "." + name_lower.rsplit(".", 1)[-1] if "." in name_lower else ""
@@ -299,9 +345,19 @@ def _fallback_scoring(
         if f.source == "jackett" and (f.seeders is None or f.seeders < 10):
             continue
 
-        score = 75 if is_video else 10
+        # Title relevance (main scoring factor)
+        if query:
+            score = _title_match_score(query, f.name)
+        else:
+            score = 75 if is_video else 10
+
+        # Language bonus
         if is_lang:
-            score = min(100, score + 10)
+            score = min(100, score + 5)
+
+        # Non-video penalty
+        if not is_video:
+            score = min(score, 20)
 
         results.append(
             ScoredFile(

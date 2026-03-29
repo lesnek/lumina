@@ -241,7 +241,7 @@ async def search_files(
         scored = await score_results(query, scorable, cfg["groq_api_key"], languages=languages)
     except Exception as e:
         logger.warning("AI scoring failed, using fallback: %s", e)
-        scored = _fallback_scoring(scorable, languages=languages)
+        scored = _fallback_scoring(scorable, languages=languages, query=query)
 
     min_score = int(cfg.get("min_relevance_score", "70"))
     return [s for s in scored if s.relevance_score >= min_score]
