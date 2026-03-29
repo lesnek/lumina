@@ -8,10 +8,13 @@ import {
   LibraryMovie,
   LibraryShow,
   LibraryShowDetail,
+  TMDBSearchResult,
   scanLibrary,
   getLibraryMovies,
   getLibraryShows,
   getShowDetail,
+  searchTMDBForFix,
+  fixMovieMatch,
   formatSize,
 } from "@/lib/api";
 import DownloadPanel from "@/components/DownloadPanel";
@@ -36,6 +39,10 @@ export default function LibraryPage() {
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [selectedShow, setSelectedShow] = useState<LibraryShowDetail | null>(null);
   const [showLoading, setShowLoading] = useState(false);
+  const [fixingMovie, setFixingMovie] = useState<LibraryMovie | null>(null);
+  const [fixQuery, setFixQuery] = useState("");
+  const [fixResults, setFixResults] = useState<TMDBSearchResult[]>([]);
+  const [fixSearching, setFixSearching] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -165,6 +172,11 @@ export default function LibraryPage() {
                       {movie.quality}
                     </span>
                   )}
+                  {movie.matched_by === "filename" && (
+                    <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-orange-900/80 text-orange-300 text-[9px] font-bold">
+                      ?
+                    </span>
+                  )}
                 </div>
                 <div className="p-2">
                   <p className="text-sm font-medium text-zinc-100 truncate">{movie.title}</p>
@@ -172,6 +184,14 @@ export default function LibraryPage() {
                     {movie.year && <span>{movie.year}</span>}
                     <span>{formatSize(movie.file_size)}</span>
                   </div>
+                  {movie.matched_by === "filename" && (
+                    <button
+                      onClick={() => { setFixingMovie(movie); setFixQuery(movie.filename.replace(/\.[^.]+$/, "")); setFixResults([]); }}
+                      className="mt-1 text-[10px] text-orange-400 hover:text-orange-300 transition-colors"
+                    >
+                      Opravit match
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -325,6 +345,73 @@ export default function LibraryPage() {
       {showLoading && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="text-zinc-300 animate-pulse">Nacitam serial...</div>
+        </div>
+      )}
+
+      {/* Fix Match Modal */}
+      {fixingMovie && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setFixingMovie(null)}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 max-w-lg w-full mx-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-zinc-100">Opravit match</h3>
+            <p className="text-sm text-zinc-400 truncate">Soubor: {fixingMovie.filename}</p>
+            <p className="text-sm text-zinc-500">Aktualne: <span className="text-zinc-300">{fixingMovie.title} ({fixingMovie.year})</span></p>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={fixQuery}
+                onChange={(e) => setFixQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && fixQuery.trim()) {
+                    setFixSearching(true);
+                    searchTMDBForFix(fixingMovie.id, fixQuery).then(setFixResults).finally(() => setFixSearching(false));
+                  }
+                }}
+                placeholder="Hledej na TMDB..."
+                className="flex-1 rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:border-violet-500 outline-none"
+              />
+              <button
+                onClick={() => {
+                  setFixSearching(true);
+                  searchTMDBForFix(fixingMovie.id, fixQuery).then(setFixResults).finally(() => setFixSearching(false));
+                }}
+                disabled={fixSearching}
+                className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-500 disabled:opacity-50"
+              >
+                {fixSearching ? "..." : "Hledat"}
+              </button>
+            </div>
+
+            {fixResults.length > 0 && (
+              <div className="max-h-64 overflow-y-auto space-y-1">
+                {fixResults.map((r) => (
+                  <button
+                    key={r.tmdb_id}
+                    onClick={async () => {
+                      await fixMovieMatch(fixingMovie.id, r.tmdb_id);
+                      setFixingMovie(null);
+                      loadData();
+                    }}
+                    className="flex items-center gap-3 w-full p-2 rounded-lg hover:bg-zinc-800 transition-colors text-left"
+                  >
+                    {r.poster_url ? (
+                      <Image src={r.poster_url} alt="" width={32} height={48} className="rounded" />
+                    ) : (
+                      <div className="w-8 h-12 bg-zinc-700 rounded" />
+                    )}
+                    <div>
+                      <p className="text-sm text-zinc-100">{r.title}</p>
+                      <p className="text-xs text-zinc-500">{r.year} · TMDB {r.tmdb_id}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button onClick={() => setFixingMovie(null)} className="text-sm text-zinc-500 hover:text-zinc-300">
+              Zavrit
+            </button>
+          </div>
         </div>
       )}
 

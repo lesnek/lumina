@@ -371,6 +371,14 @@ export interface LibraryMovie {
   quality: string;
   language: string;
   added_at: string;
+  matched_by?: "nfo" | "filename" | "manual";
+}
+
+export interface TMDBSearchResult {
+  tmdb_id: number;
+  title: string;
+  year: string;
+  poster_url: string | null;
 }
 
 export interface LibraryShow {
@@ -442,6 +450,20 @@ export async function deleteLibraryMovie(id: number): Promise<void> {
 
 export async function deleteLibraryShow(tmdbId: number): Promise<void> {
   await fetch(`${API_BASE}/api/library/shows/${tmdbId}`, { method: "DELETE" });
+}
+
+export async function searchTMDBForFix(movieId: number, query: string): Promise<TMDBSearchResult[]> {
+  const res = await fetch(`${API_BASE}/api/library/movies/${movieId}/search-tmdb?query=${encodeURIComponent(query)}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fixMovieMatch(movieId: number, tmdbId: number): Promise<void> {
+  await fetch(`${API_BASE}/api/library/movies/${movieId}/fix`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tmdb_id: tmdbId }),
+  });
 }
 
 // --- Utilities ---

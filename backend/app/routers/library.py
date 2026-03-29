@@ -174,12 +174,30 @@ async def scan_library():
             stats["movies_found"] = len(movie_files)
 
             for f in movie_files:
-                # Skip if already in DB
+                # Check if already in DB
                 cursor = await db.execute(
-                    "SELECT id FROM library_movies WHERE file_path = ?",
+                    "SELECT id, matched_by FROM library_movies WHERE file_path = ?",
                     (f["file_path"],),
                 )
-                if await cursor.fetchone():
+                existing = await cursor.fetchone()
+                if existing:
+                    # If matched by filename but NFO now exists, upgrade
+                    if existing[1] != "nfo" and existing[1] != "manual":
+                        nfo_upgrade = _parse_nfo(f["file_path"])
+                        if nfo_upgrade and nfo_upgrade.get("tmdb_id"):
+                            try:
+                                details = await client.get_movie_details(nfo_upgrade["tmdb_id"])
+                                await db.execute(
+                                    """UPDATE library_movies
+                                    SET tmdb_id = ?, title = ?, original_title = ?, year = ?,
+                                        poster_url = ?, overview = ?, matched_by = 'nfo'
+                                    WHERE id = ?""",
+                                    (details["tmdb_id"], details["title"], details["original_title"],
+                                     details["year"], details["poster_url"], details["overview"],
+                                     existing[0]),
+                                )
+                            except Exception:
+                                pass
                     stats["movies_matched"] += 1
                     continue
 
