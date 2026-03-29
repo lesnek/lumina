@@ -204,16 +204,22 @@ async def search_files(
             )
             return []
 
-    # DDL sources (WebShare, FastShare) get only the main query
+    # DDL sources get cleaned query (no year, no punctuation — DDL search is fuzzy)
     # Jackett gets ALL query variants (EN title, stripped diacritics, etc.)
+    ddl_query = re.sub(r"[^\w\s]", " ", query)  # strip : ; ' etc.
+    ddl_query = re.sub(r"\b\d{4}\b", "", ddl_query)  # strip year
+    ddl_query = re.sub(r"\s+", " ", ddl_query).strip()
+    if not ddl_query:
+        ddl_query = query
+
     tasks = []
     for source in sources:
         if source.source_type == SourceType.JACKETT:
             for q in unique_queries:
                 tasks.append(_safe_search(source, q))
         else:
-            # DDL: just main query (CZ title + year)
-            tasks.append(_safe_search(source, query))
+            # DDL: cleaned query (no year, no punctuation)
+            tasks.append(_safe_search(source, ddl_query))
     print(f"[SEARCH] Dispatching {len(tasks)} tasks across {len(sources)} sources: "
           + ", ".join(f"{s.source_type.value}:{s.source_id}" for s in sources), flush=True)
     results_per_task = await asyncio.gather(*tasks)
