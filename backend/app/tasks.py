@@ -67,7 +67,7 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
     if content_type == "movie" and radarr_cfg and radarr_cfg.get("enabled"):
         cfg = radarr_cfg["config"]
         if cfg.get("api_key") and cfg.get("url"):
-            logger.info("Adding movie to Radarr: %s", title)
+            print(f"[TASKS] Radarr post-processing: {title} (tmdb={tmdb_id})", flush=True)
             radarr = RadarrClient(cfg["url"], cfg["api_key"])
             try:
                 movie = await radarr.get_movie_by_tmdb_id(tmdb_id)
@@ -82,6 +82,9 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
                     shutil.move(current_path, dest)
                     os.chmod(dest, 0o664)
                     await radarr.trigger_blackhole_scan(cfg["blackhole_path"])
+                else:
+                    # No blackhole — trigger scan on download dir
+                    await radarr.trigger_blackhole_scan(str(Path(current_path).parent))
             except Exception as e:
                 logger.error("Radarr integration failed for %s: %s", title, e)
             finally:
