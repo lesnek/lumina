@@ -191,6 +191,11 @@ async def score_results(
     if not files:
         return []
 
+    # Pre-filter: drop torrents with less than 10 seeders
+    files = [f for f in files if not (f.source == "jackett" and (f.seeders is None or f.seeders < 10))]
+    if not files:
+        return []
+
     system_prompt = _build_system_prompt(languages or ["cs"])
 
     lines: list[str] = []
@@ -290,11 +295,13 @@ def _fallback_scoring(
                 quality = q.upper() if q == "4k" else q
                 break
 
+        # Filter out torrents with low seeders
+        if f.source == "jackett" and (f.seeders is None or f.seeders < 10):
+            continue
+
         score = 75 if is_video else 10
         if is_lang:
             score = min(100, score + 10)
-        if f.seeders is not None and f.seeders > 5:
-            score = min(100, score + 5)
 
         results.append(
             ScoredFile(
