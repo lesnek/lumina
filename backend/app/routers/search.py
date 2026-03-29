@@ -23,10 +23,13 @@ async def search_movies(query: str, language: str | None = None) -> list[TMDBMov
     tmdb_locale = f"{lang_code}-{lang_code.upper()}"
     client = TMDBClient(cfg["tmdb_api_key"])
     try:
-        movies, shows = await asyncio.gather(
+        results = await asyncio.gather(
             client.search_movie(query, language=tmdb_locale),
             client.search_tv(query, language=tmdb_locale),
+            return_exceptions=True,
         )
+        movies = results[0] if isinstance(results[0], list) else []
+        shows = results[1] if isinstance(results[1], list) else []
         # Interleave: movie, tv, movie, tv... then append remaining
         merged: list[TMDBMovie] = []
         mi, ti = 0, 0

@@ -11,7 +11,7 @@ IMG_BASE = "https://image.tmdb.org/t/p/w500"
 class TMDBClient:
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
-        self._http = httpx.AsyncClient(timeout=15)
+        self._http = httpx.AsyncClient(timeout=30)
 
     async def search_movie(self, title: str, language: str = "cs-CZ") -> list[TMDBMovie]:
         resp = await self._http.get(
