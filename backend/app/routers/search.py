@@ -147,6 +147,8 @@ async def search_files(
     query: str,
     language: str | None = None,
     original_title: str | None = None,
+    tmdb_id: int | None = None,
+    media_type: str | None = None,
 ) -> list[ScoredFile]:
     cfg = await get_effective_settings()
     sources = SourceRegistry.get().sources
@@ -155,52 +157,68 @@ async def search_files(
 
     # Parse language list
     languages = [l.strip() for l in cfg.get("languages", "cs").split(",") if l.strip()]
-    # If explicit language filter, only use that one for scoring
     if language:
         languages = [language]
 
+    # Build all query variants
+    all_queries = [query]
     alt_queries = _build_alt_queries(query, original_title or "")
-    if alt_queries:
-        logger.info("Alt queries for '%s': %s", query, alt_queries)
+    all_queries.extend(alt_queries)
+
+    # Fetch English title from TMDB if we have tmdb_id (for non-EN content)
+    if tmdb_id:
+        try:
+            client = TMDBClient(cfg["tmdb_api_key"])
+            en_title = await client.get_english_title(
+                tmdb_id, media_type or "movie"
+            )
+            await client.close()
+            if en_title and en_title.lower() not in [q.lower() for q in all_queries]:
+                all_queries.append(en_title)
+                logger.info("EN title for tmdb=%d: '%s'", tmdb_id, en_title)
+        except Exception as e:
+            logger.warning("Failed to fetch EN title for tmdb=%d: %s", tmdb_id, e)
+
+    # Deduplicate queries (case-insensitive)
+    seen_lower: set[str] = set()
+    unique_queries: list[str] = []
+    for q in all_queries:
+        if q.lower() not in seen_lower:
+            seen_lower.add(q.lower())
+            unique_queries.append(q)
+
+    logger.info("Search queries: %s", unique_queries)
 
     async def _safe_search(source, q: str) -> list[SearchResult]:
         try:
             return await source.search(q)
         except Exception as e:
             logger.warning(
-                "Source %s (id=%d) search failed: %s",
-                source.source_type.value,
-                source.source_id,
-                e,
+                "Source %s (id=%d) search '%s' failed: %s",
+                source.source_type.value, source.source_id, q, e,
             )
             return []
 
-    async def _search_with_fallback(source) -> list[SearchResult]:
-        """Search with main query; for torrent sources try alt queries if empty."""
-        results = await _safe_search(source, query)
-        if results or source.source_type != SourceType.JACKETT:
-            return results
-        # Jackett: try alternative queries
-        seen_idents: set[str] = set()
-        for alt_q in alt_queries:
-            alt_results = await _safe_search(source, alt_q)
-            for r in alt_results:
-                if r.ident not in seen_idents:
-                    seen_idents.add(r.ident)
-                    results.append(r)
-            if results:
-                logger.info("Jackett fallback '%s' found %d results", alt_q, len(results))
-                break
-        return results
+    # Search ALL sources with ALL query variants in parallel
+    tasks = []
+    for source in sources:
+        for q in unique_queries:
+            tasks.append(_safe_search(source, q))
+    results_per_task = await asyncio.gather(*tasks)
 
-    tasks = [_search_with_fallback(s) for s in sources]
-    results_per_source = await asyncio.gather(*tasks)
-
+    # Merge and deduplicate by ident
+    seen_idents: set[str] = set()
     all_results: list[SearchResult] = []
-    for batch in results_per_source:
-        all_results.extend(batch)
+    for batch in results_per_task:
+        for r in batch:
+            if r.ident not in seen_idents:
+                seen_idents.add(r.ident)
+                all_results.append(r)
 
-    logger.info("Search '%s': %d total results from %d sources", query, len(all_results), len(sources))
+    logger.info(
+        "Search '%s': %d unique results from %d sources × %d queries",
+        query, len(all_results), len(sources), len(unique_queries),
+    )
 
     if not all_results:
         return []

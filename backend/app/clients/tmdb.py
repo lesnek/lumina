@@ -137,5 +137,83 @@ class TMDBClient:
             )
         return shows
 
+    async def get_english_title(self, tmdb_id: int, media_type: str = "movie") -> str:
+        """Fetch the English title for a movie or TV show."""
+        endpoint = "movie" if media_type == "movie" else "tv"
+        resp = await self._http.get(
+            f"{API_BASE}/{endpoint}/{tmdb_id}",
+            params={"api_key": self._api_key, "language": "en-US"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if media_type == "tv":
+            return data.get("name", "")
+        return data.get("title", "")
+
+    async def get_tv_details(self, tmdb_id: int, language: str = "cs-CZ") -> dict:
+        """Fetch TV show details including season count."""
+        resp = await self._http.get(
+            f"{API_BASE}/tv/{tmdb_id}",
+            params={"api_key": self._api_key, "language": language},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "tmdb_id": tmdb_id,
+            "title": data.get("name", ""),
+            "original_title": data.get("original_name", ""),
+            "overview": data.get("overview", ""),
+            "poster_url": f"{IMG_BASE}{data['poster_path']}" if data.get("poster_path") else None,
+            "total_seasons": data.get("number_of_seasons", 0),
+            "total_episodes": data.get("number_of_episodes", 0),
+            "first_air_date": data.get("first_air_date", ""),
+            "seasons": [
+                {
+                    "season_number": s.get("season_number", 0),
+                    "episode_count": s.get("episode_count", 0),
+                    "name": s.get("name", ""),
+                    "air_date": s.get("air_date", ""),
+                }
+                for s in data.get("seasons", [])
+                if s.get("season_number", 0) > 0  # skip specials (S00)
+            ],
+        }
+
+    async def get_season(self, tmdb_id: int, season_number: int, language: str = "cs-CZ") -> list[dict]:
+        """Fetch episodes for a specific season."""
+        resp = await self._http.get(
+            f"{API_BASE}/tv/{tmdb_id}/season/{season_number}",
+            params={"api_key": self._api_key, "language": language},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "episode_number": ep.get("episode_number", 0),
+                "name": ep.get("name", ""),
+                "air_date": ep.get("air_date", ""),
+                "overview": ep.get("overview", ""),
+            }
+            for ep in data.get("episodes", [])
+        ]
+
+    async def get_movie_details(self, tmdb_id: int, language: str = "cs-CZ") -> dict:
+        """Fetch movie details."""
+        resp = await self._http.get(
+            f"{API_BASE}/movie/{tmdb_id}",
+            params={"api_key": self._api_key, "language": language},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        release = data.get("release_date", "") or ""
+        return {
+            "tmdb_id": tmdb_id,
+            "title": data.get("title", ""),
+            "original_title": data.get("original_title", ""),
+            "year": release[:4] if len(release) >= 4 else "",
+            "overview": data.get("overview", ""),
+            "poster_url": f"{IMG_BASE}{data['poster_path']}" if data.get("poster_path") else None,
+        }
+
     async def close(self) -> None:
         await self._http.aclose()

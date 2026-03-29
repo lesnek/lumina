@@ -1,0 +1,142 @@
+"""Parse TV show filenames to extract show name, season, and episode numbers."""
+
+import re
+import unicodedata
+
+# Patterns to match season/episode in filenames (ordered by specificity)
+_SE_PATTERNS = [
+    re.compile(r"[Ss](\d{1,2})[Ee](\d{1,3})"),           # S01E05
+    re.compile(r"(\d{1,2})x(\d{1,3})"),                    # 1x05
+    re.compile(r"[Ss]eason\s*(\d{1,2}).*[Ee]pisode\s*(\d{1,3})"),  # Season 1 Episode 5
+    re.compile(r"[Ee](\d{1,3})\b"),                         # E05 (season unknown)
+]
+
+# Quality tags to strip from show name
+_QUALITY_TAGS = re.compile(
+    r"\b(2160p|1080p|720p|480p|4K|UHD|HDR|WEB-DL|WEBRip|BluRay|BDRip|"
+    r"DVDRip|HDTV|x264|x265|H\.?264|H\.?265|HEVC|AVC|AAC|AC3|DTS|"
+    r"FLAC|MULTI|MULTi|DUAL|REMUX|NF|AMZN|PROPER|REPACK)\b",
+    re.IGNORECASE,
+)
+
+# Release group pattern (at end, in brackets)
+_RELEASE_GROUP = re.compile(r"[\[\(]([^\]\)]+)[\]\)]")
+
+# Year pattern
+_YEAR = re.compile(r"\b((?:19|20)\d{2})\b")
+
+# Video extensions
+VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".ts", ".m4v", ".wmv", ".flv", ".mov", ".webm"}
+
+
+def parse_tv_filename(filename: str) -> dict | None:
+    """Parse a TV show filename into components.
+
+    Returns dict with keys: show_name, season, episode, year (optional)
+    or None if not a TV episode.
+    """
+    name = filename
+    # Remove extension
+    for ext in VIDEO_EXTS:
+        if name.lower().endswith(ext):
+            name = name[: -len(ext)]
+            break
+
+    # Try to find season/episode
+    season: int | None = None
+    episode: int | None = None
+    se_match_pos = len(name)  # position where S/E pattern starts
+
+    for pattern in _SE_PATTERNS:
+        match = pattern.search(name)
+        if match:
+            if len(match.groups()) == 2:
+                season = int(match.group(1))
+                episode = int(match.group(2))
+            else:
+                # Only episode number (E05 pattern)
+                season = None
+                episode = int(match.group(1))
+            se_match_pos = match.start()
+            break
+
+    if episode is None:
+        return None  # Not a TV episode
+
+    # Extract show name: everything before the S/E pattern
+    show_part = name[:se_match_pos].strip()
+
+    # Clean up show name
+    show_part = _RELEASE_GROUP.sub("", show_part)  # Remove [group] tags
+    show_part = _QUALITY_TAGS.sub("", show_part)    # Remove quality tags
+    show_part = re.sub(r"[._]", " ", show_part)     # Dots/underscores to spaces
+    show_part = re.sub(r"\s*[-–—]\s*$", "", show_part)  # Trailing dash
+    show_part = re.sub(r"\s+", " ", show_part).strip()
+
+    # Extract year from show name
+    year: str | None = None
+    year_match = _YEAR.search(show_part)
+    if year_match:
+        year = year_match.group(1)
+        # Only remove year if it's at the end (not part of show name)
+        if show_part.endswith(year):
+            show_part = show_part[: year_match.start()].strip()
+
+    if not show_part:
+        return None
+
+    return {
+        "show_name": show_part,
+        "season": season or 1,
+        "episode": episode,
+        "year": year,
+    }
+
+
+def parse_movie_filename(filename: str) -> dict | None:
+    """Parse a movie filename into title and year.
+
+    Returns dict with keys: title, year (optional)
+    or None if unparseable.
+    """
+    name = filename
+    for ext in VIDEO_EXTS:
+        if name.lower().endswith(ext):
+            name = name[: -len(ext)]
+            break
+
+    # If it looks like a TV episode, skip
+    if parse_tv_filename(filename) is not None:
+        return None
+
+    # Replace dots/underscores
+    name = re.sub(r"[._]", " ", name)
+
+    # Extract year
+    year: str | None = None
+    year_match = _YEAR.search(name)
+    if year_match:
+        year = year_match.group(1)
+        # Take everything before the year as title
+        name = name[: year_match.start()]
+
+    # Remove quality tags and release groups
+    name = _QUALITY_TAGS.sub("", name)
+    name = _RELEASE_GROUP.sub("", name)
+    name = re.sub(r"\s*[-–—]\s*$", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+
+    if not name:
+        return None
+
+    return {"title": name, "year": year}
+
+
+def normalize_for_search(text: str) -> str:
+    """Normalize text for fuzzy TMDB search matching."""
+    # Strip diacritics
+    nfkd = unicodedata.normalize("NFKD", text)
+    ascii_text = nfkd.encode("ascii", "ignore").decode("ascii")
+    # Lowercase, strip special chars
+    clean = re.sub(r"[^\w\s]", " ", ascii_text.lower())
+    return re.sub(r"\s+", " ", clean).strip()

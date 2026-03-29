@@ -36,6 +36,12 @@ export default function RootLayout({
                 Objevit
               </Link>
               <Link
+                href="/library"
+                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Knihovna
+              </Link>
+              <Link
                 href="/duplicates"
                 className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
               >

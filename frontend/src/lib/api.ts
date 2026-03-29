@@ -97,10 +97,18 @@ export async function searchMovies(query: string, language?: string): Promise<TM
   return res.json();
 }
 
-export async function searchFiles(query: string, language?: string, originalTitle?: string): Promise<ScoredFile[]> {
+export async function searchFiles(
+  query: string,
+  language?: string,
+  originalTitle?: string,
+  tmdbId?: number,
+  mediaType?: string,
+): Promise<ScoredFile[]> {
   const params = new URLSearchParams({ query });
   if (language) params.set("language", language);
   if (originalTitle && originalTitle !== query) params.set("original_title", originalTitle);
+  if (tmdbId) params.set("tmdb_id", String(tmdbId));
+  if (mediaType) params.set("media_type", mediaType);
   const res = await fetch(`${API_BASE}/api/search/files?${params}`);
   if (!res.ok) throw new Error(`File search failed: ${res.status}`);
   return res.json();
@@ -347,6 +355,93 @@ export async function deleteDuplicateFile(fileId: number): Promise<{ ok: boolean
   const res = await fetch(`${API_BASE}/api/duplicates/file/${fileId}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json();
+}
+
+// --- Library ---
+
+export interface LibraryMovie {
+  id: number;
+  tmdb_id: number;
+  title: string;
+  original_title: string;
+  year: string;
+  poster_url: string | null;
+  filename: string;
+  file_size: number;
+  quality: string;
+  language: string;
+  added_at: string;
+}
+
+export interface LibraryShow {
+  tmdb_id: number;
+  title: string;
+  original_title: string;
+  year: string;
+  poster_url: string | null;
+  total_seasons: number;
+  total_episodes: number;
+  owned_episodes: number;
+}
+
+export interface LibraryEpisode {
+  episode: number;
+  title: string;
+  air_date: string;
+  has_file: boolean;
+  filename: string;
+  file_size: number;
+  quality: string;
+  language: string;
+}
+
+export interface LibrarySeason {
+  season_number: number;
+  episodes: LibraryEpisode[];
+}
+
+export interface LibraryShowDetail {
+  tmdb_id: number;
+  title: string;
+  original_title: string;
+  year: string;
+  poster_url: string | null;
+  overview: string;
+  total_seasons: number;
+  total_episodes: number;
+  seasons: LibrarySeason[];
+}
+
+export async function scanLibrary(): Promise<{ movies_found: number; movies_matched: number; shows_found: number; episodes_matched: number }> {
+  const res = await fetch(`${API_BASE}/api/library/scan`, { method: "POST" });
+  if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getLibraryMovies(): Promise<LibraryMovie[]> {
+  const res = await fetch(`${API_BASE}/api/library/movies`);
+  if (!res.ok) throw new Error(`Failed to load library movies: ${res.status}`);
+  return res.json();
+}
+
+export async function getLibraryShows(): Promise<LibraryShow[]> {
+  const res = await fetch(`${API_BASE}/api/library/shows`);
+  if (!res.ok) throw new Error(`Failed to load library shows: ${res.status}`);
+  return res.json();
+}
+
+export async function getShowDetail(tmdbId: number): Promise<LibraryShowDetail> {
+  const res = await fetch(`${API_BASE}/api/library/shows/${tmdbId}`);
+  if (!res.ok) throw new Error(`Failed to load show detail: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteLibraryMovie(id: number): Promise<void> {
+  await fetch(`${API_BASE}/api/library/movies/${id}`, { method: "DELETE" });
+}
+
+export async function deleteLibraryShow(tmdbId: number): Promise<void> {
+  await fetch(`${API_BASE}/api/library/shows/${tmdbId}`, { method: "DELETE" });
 }
 
 // --- Utilities ---

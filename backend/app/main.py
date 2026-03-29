@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
 from app.tasks import ensure_monitor_running
-from app.routers import search, download, sources, settings, duplicates, integrations
+from app.routers import search, download, sources, settings, duplicates, integrations, library
 from app.sources.registry import SourceRegistry
 
 
@@ -33,6 +33,7 @@ app.include_router(sources.router)
 app.include_router(settings.router)
 app.include_router(duplicates.router)
 app.include_router(integrations.router)
+app.include_router(library.router)
 
 
 @app.get("/api/health")
