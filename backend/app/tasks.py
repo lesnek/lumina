@@ -74,23 +74,23 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
                 if not movie and cfg.get("auto_add") == "true":
                     await radarr.add_movie(tmdb_id, title, year, cfg.get("root_folder", "/data/movies"))
 
-                # Move file into subfolder: Title (Year)/filename.mkv
-                # Radarr needs this structure to match
-                folder_name = f"{title} ({year})" if year else title
-                # Sanitize folder name
-                folder_name = "".join(c for c in folder_name if c not in '<>:"/\\|?*')
-                movie_dir = Path(current_path).parent / folder_name
-                movie_dir.mkdir(parents=True, exist_ok=True)
-                new_path = movie_dir / Path(current_path).name
-                if not new_path.exists():
-                    shutil.move(current_path, new_path)
-                    current_path = str(new_path)
-                    print(f"[TASKS] Moved to subfolder: {current_path}", flush=True)
-
-                # Trigger Radarr scan
-                scan_path = str(Path(current_path).parent)
-                await radarr.trigger_blackhole_scan(scan_path)
-                print(f"[TASKS] Radarr scan triggered: {scan_path}", flush=True)
+                if cfg.get("blackhole_path"):
+                    # Move file to blackhole — Radarr picks it up and does the rest
+                    dest = Path(cfg["blackhole_path"]) / Path(current_path).name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    try: os.chmod(dest.parent, 0o775)
+                    except: pass
+                    if str(Path(current_path).resolve()) != str(dest.resolve()):
+                        shutil.move(current_path, dest)
+                        current_path = str(dest)
+                        print(f"[TASKS] Moved to blackhole: {current_path}", flush=True)
+                    await radarr.trigger_blackhole_scan(cfg["blackhole_path"])
+                    print(f"[TASKS] Radarr scan triggered: {cfg['blackhole_path']}", flush=True)
+                else:
+                    # No blackhole — just trigger scan on download dir
+                    scan_path = str(Path(current_path).parent)
+                    await radarr.trigger_blackhole_scan(scan_path)
+                    print(f"[TASKS] Radarr scan triggered: {scan_path}", flush=True)
             except Exception as e:
                 logger.error("Radarr integration failed for %s: %s", title, e)
             finally:
