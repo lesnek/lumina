@@ -91,7 +91,7 @@ export default function LibraryPage() {
 
   function handleSearchEpisode(showTitle: string, season: number, episode: number) {
     const query = `${showTitle} S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
-    router.push(`/?q=${encodeURIComponent(query)}`);
+    router.push(`/?q=${encodeURIComponent(query)}&filesearch=1`);
   }
 
   return (

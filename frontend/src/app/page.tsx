@@ -69,13 +69,28 @@ function HomeContent() {
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
+
     const movieParam = searchParams.get("movie");
-    if (movieParam && ready) {
+    if (movieParam) {
       try {
         const movie: TMDBMovie = JSON.parse(decodeURIComponent(atob(movieParam)));
         handleDiscoverMovie(movie);
       } catch { /* ignore bad data */ }
-      // Clean URL
+      window.history.replaceState({}, "", "/");
+      return;
+    }
+
+    // Direct file search (e.g. from Library "Hledat" for episodes)
+    const qParam = searchParams.get("q");
+    const directSearch = searchParams.get("filesearch");
+    if (qParam && directSearch) {
+      // Skip TMDB, go straight to file search
+      setSelectedMovie({ tmdb_id: 0, title: qParam, original_title: "", year: "", overview: "", poster_url: null, media_type: "tv" });
+      setFiles([]);
+      setFilesLoading(true);
+      setError(null);
+      searchFiles(qParam).then(setFiles).catch((e) => setError(e instanceof Error ? e.message : "Search error")).finally(() => setFilesLoading(false));
       window.history.replaceState({}, "", "/");
     }
   }, [searchParams, ready, handleDiscoverMovie]);
