@@ -144,7 +144,7 @@ async def scan_library():
             # Group by show name
             show_groups: dict[str, list[dict]] = {}
             for f in tv_files:
-                parsed = parse_tv_filename(f["filename"])
+                parsed = parse_tv_filename(f["filename"], f["file_path"])
                 if not parsed:
                     continue
                 key = normalize_for_search(parsed["show_name"])
