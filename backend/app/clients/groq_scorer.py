@@ -187,6 +187,7 @@ async def score_results(
     files: list[ScorableFile],
     api_key: str,
     languages: list[str] | None = None,
+    model: str = "llama-3.3-70b-versatile",
 ) -> list[ScoredFile]:
     if not files:
         return []
@@ -217,7 +218,7 @@ async def score_results(
                 "Content-Type": "application/json",
             },
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},

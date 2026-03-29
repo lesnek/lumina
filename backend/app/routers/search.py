@@ -238,7 +238,8 @@ async def search_files(
     scorable = _to_scorable(all_results)
 
     try:
-        scored = await score_results(query, scorable, cfg["groq_api_key"], languages=languages)
+        groq_model = cfg.get("groq_model", "llama-3.3-70b-versatile")
+        scored = await score_results(query, scorable, cfg["groq_api_key"], languages=languages, model=groq_model)
     except Exception as e:
         logger.warning("AI scoring failed, using fallback: %s", e)
         scored = _fallback_scoring(scorable, languages=languages, query=query)

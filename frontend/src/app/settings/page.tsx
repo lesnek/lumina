@@ -101,6 +101,12 @@ const GENERAL_SECTIONS = [
     fields: [
       { key: "tmdb_api_key", label: "TMDB API Key", type: "password", hint: "Pro vyhledávání filmů (themoviedb.org)" },
       { key: "groq_api_key", label: "Groq API Key", type: "password", hint: "Pro AI hodnocení souborů (console.groq.com)" },
+      { key: "groq_model", label: "Groq Model", type: "select_static", options: [
+        { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (lepší, nižší limity)" },
+        { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant (rychlejší, vyšší limity)" },
+        { value: "gemma2-9b-it", label: "Gemma 2 9B" },
+        { value: "mixtral-8x7b-32768", label: "Mixtral 8x7B" },
+      ], hint: "Model pro AI scoring souborů" },
     ],
   },
   {
@@ -234,6 +240,13 @@ export default function SettingsPage() {
                     className="flex-1 rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none" />
                   <button type="button" onClick={() => setBrowsingField(field.key)} className="rounded bg-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-600 transition-colors">Procházet</button>
                 </div>
+              ) : field.type === "select_static" ? (
+                <select value={settings[field.key] || (field as any).options?.[0]?.value || ""} onChange={(e) => handleSettingChange(field.key, e.target.value)}
+                  className="w-full rounded bg-zinc-800 border border-zinc-700 px-3 py-2 text-zinc-100 text-sm focus:border-violet-500 outline-none">
+                  {(field as any).options?.map((opt: {value: string, label: string}) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
               ) : field.type === "range" ? (
                 <div className="flex items-center gap-3">
                   <input type="range" min="0" max="100" step="5" value={settings[field.key] || "0"}

@@ -76,15 +76,18 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
 
                 if cfg.get("blackhole_path"):
                     # Move file to blackhole — Radarr picks it up and does the rest
-                    dest = Path(cfg["blackhole_path"]) / Path(current_path).name
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    try: os.chmod(dest.parent, 0o775)
+                    blackhole = Path(cfg["blackhole_path"])
+                    blackhole.mkdir(parents=True, exist_ok=True)
+                    try: os.chmod(blackhole, 0o775)
                     except: pass
+                    dest = blackhole / Path(current_path).name
                     if str(Path(current_path).resolve()) != str(dest.resolve()):
                         shutil.move(current_path, dest)
                         current_path = str(dest)
                         print(f"[TASKS] Moved to blackhole: {current_path}", flush=True)
                     await radarr.trigger_blackhole_scan(cfg["blackhole_path"])
+                    # Re-ensure blackhole dir exists (Radarr may delete it)
+                    blackhole.mkdir(parents=True, exist_ok=True)
                     print(f"[TASKS] Radarr scan triggered: {cfg['blackhole_path']}", flush=True)
                 else:
                     # No blackhole — just trigger scan on download dir
@@ -118,13 +121,20 @@ async def run_post_processing(download_id: str, tmdb_id: int, title: str, year: 
 
                 # Move to blackhole or trigger scan
                 if cfg.get("blackhole_path"):
-                    dest = Path(cfg["blackhole_path"]) / Path(current_path).name
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    try: os.chmod(dest.parent, 0o775)
+                    blackhole = Path(cfg["blackhole_path"])
+                    blackhole.mkdir(parents=True, exist_ok=True)
+                    try: os.chmod(blackhole, 0o775)
                     except: pass
-                    shutil.move(current_path, dest)
-                    os.chmod(dest, 0o664)
+                    dest = blackhole / Path(current_path).name
+                    if str(Path(current_path).resolve()) != str(dest.resolve()):
+                        shutil.move(current_path, dest)
+                        current_path = str(dest)
+                        print(f"[TASKS] Moved to Sonarr blackhole: {current_path}", flush=True)
+                    try: os.chmod(dest, 0o664)
+                    except: pass
                     await sonarr.trigger_import_scan(cfg["blackhole_path"])
+                    # Re-ensure blackhole dir exists (Sonarr may delete it)
+                    blackhole.mkdir(parents=True, exist_ok=True)
                 else:
                     # No blackhole — just trigger scan on the download dir
                     await sonarr.trigger_import_scan(str(Path(current_path).parent))
