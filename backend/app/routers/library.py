@@ -2,9 +2,12 @@
 
 import logging
 import os
+import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from app.config import get_effective_settings
 from app.clients.tmdb import TMDBClient
@@ -50,6 +53,62 @@ def _detect_language(name: str) -> str:
         if re.search(pattern, name):
             langs.append(code)
     return ",".join(langs) if langs else ""
+
+
+def _parse_nfo(video_path: str) -> dict | None:
+    """Try to find and parse a .nfo file next to the video.
+
+    Returns dict with tmdb_id, title, original_title, year, media_type
+    or None if no NFO or no useful data found.
+    """
+    base = os.path.splitext(video_path)[0]
+    # Try: same name .nfo, then movie.nfo / tvshow.nfo in same dir
+    candidates = [
+        f"{base}.nfo",
+        os.path.join(os.path.dirname(video_path), "movie.nfo"),
+        os.path.join(os.path.dirname(video_path), "tvshow.nfo"),
+    ]
+    for nfo_path in candidates:
+        if not os.path.isfile(nfo_path):
+            continue
+        try:
+            tree = ET.parse(nfo_path)
+            root = tree.getroot()
+            tag = root.tag.lower()  # "movie", "tvshow", "episodedetails"
+
+            tmdb_id = None
+            # Try <tmdbid> or <uniqueid type="tmdb">
+            tmdb_el = root.find("tmdbid")
+            if tmdb_el is not None and tmdb_el.text:
+                tmdb_id = int(tmdb_el.text)
+            else:
+                for uid in root.findall("uniqueid"):
+                    if uid.get("type", "").lower() == "tmdb" and uid.text:
+                        tmdb_id = int(uid.text)
+                        break
+
+            if not tmdb_id:
+                continue
+
+            title = (root.findtext("title") or "").strip()
+            original_title = (root.findtext("originaltitle") or "").strip()
+            year = (root.findtext("year") or "").strip()
+
+            media_type = "movie"
+            if tag in ("tvshow", "episodedetails"):
+                media_type = "tv"
+
+            return {
+                "tmdb_id": tmdb_id,
+                "title": title,
+                "original_title": original_title,
+                "year": year,
+                "media_type": media_type,
+                "matched_by": "nfo",
+            }
+        except Exception:
+            continue
+    return None
 
 
 def _scan_video_files(directory: str) -> list[dict]:
@@ -124,18 +183,37 @@ async def scan_library():
                     stats["movies_matched"] += 1
                     continue
 
+                # 1. Try NFO file first (most reliable)
+                nfo = _parse_nfo(f["file_path"])
+                if nfo and nfo.get("tmdb_id"):
+                    try:
+                        details = await client.get_movie_details(nfo["tmdb_id"])
+                        await db.execute(
+                            """INSERT OR REPLACE INTO library_movies
+                            (tmdb_id, title, original_title, year, poster_url, overview,
+                             filename, file_path, file_size, quality, language, added_at, matched_by)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), 'nfo')""",
+                            (details["tmdb_id"], details["title"], details["original_title"],
+                             details["year"], details["poster_url"], details["overview"],
+                             f["filename"], f["file_path"], f["file_size"],
+                             f["quality"], f["language"], f["added_at"]),
+                        )
+                        stats["movies_matched"] += 1
+                        continue
+                    except Exception as e:
+                        logger.warning("NFO TMDB fetch failed for '%s': %s", f["filename"], e)
+
+                # 2. Fallback: parse filename → TMDB search
                 parsed = parse_movie_filename(f["filename"])
                 if not parsed:
                     continue
 
-                # Search TMDB — try multiple queries
                 title = parsed["title"]
                 year = parsed.get("year")
                 queries = []
                 if year:
                     queries.append(f"{title} {year}")
                 queries.append(title)
-                # Also try without diacritics
                 stripped = normalize_for_search(title)
                 if stripped != title.lower():
                     if year:
@@ -153,8 +231,8 @@ async def scan_library():
                         await db.execute(
                             """INSERT OR REPLACE INTO library_movies
                             (tmdb_id, title, original_title, year, poster_url, overview,
-                             filename, file_path, file_size, quality, language, added_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))""",
+                             filename, file_path, file_size, quality, language, added_at, matched_by)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'), 'filename')""",
                             (movie.tmdb_id, movie.title, movie.original_title, movie.year,
                              movie.poster_url, movie.overview,
                              f["filename"], f["file_path"], f["file_size"],
@@ -272,7 +350,7 @@ async def get_library_movies():
     try:
         cursor = await db.execute(
             """SELECT id, tmdb_id, title, original_title, year, poster_url,
-                      filename, file_size, quality, language, added_at
+                      filename, file_size, quality, language, added_at, matched_by
             FROM library_movies ORDER BY added_at DESC"""
         )
         rows = await cursor.fetchall()
@@ -282,6 +360,7 @@ async def get_library_movies():
                 "original_title": r[3], "year": r[4], "poster_url": r[5],
                 "filename": r[6], "file_size": r[7], "quality": r[8],
                 "language": r[9], "added_at": r[10],
+                "matched_by": r[11] if len(r) > 11 else "filename",
             }
             for r in rows
         ]
@@ -299,6 +378,48 @@ async def delete_library_movie(movie_id: int):
         return {"ok": True}
     finally:
         await db.close()
+
+
+class FixMatchRequest(BaseModel):
+    tmdb_id: int
+
+
+@router.put("/movies/{movie_id}/fix")
+async def fix_movie_match(movie_id: int, body: FixMatchRequest):
+    """Fix a wrongly matched movie by providing the correct TMDB ID."""
+    cfg = await get_effective_settings()
+    client = TMDBClient(cfg["tmdb_api_key"])
+    db = await get_db()
+    try:
+        details = await client.get_movie_details(body.tmdb_id)
+        await db.execute(
+            """UPDATE library_movies
+            SET tmdb_id = ?, title = ?, original_title = ?, year = ?,
+                poster_url = ?, overview = ?, matched_by = 'manual'
+            WHERE id = ?""",
+            (details["tmdb_id"], details["title"], details["original_title"],
+             details["year"], details["poster_url"], details["overview"], movie_id),
+        )
+        await db.commit()
+        return {"ok": True, "title": details["title"]}
+    finally:
+        await client.close()
+        await db.close()
+
+
+@router.get("/movies/{movie_id}/search-tmdb")
+async def search_tmdb_for_fix(movie_id: int, query: str):
+    """Search TMDB for a movie to fix a wrong match."""
+    cfg = await get_effective_settings()
+    client = TMDBClient(cfg["tmdb_api_key"])
+    try:
+        results = await client.search_movie(query)
+        return [
+            {"tmdb_id": m.tmdb_id, "title": m.title, "year": m.year, "poster_url": m.poster_url}
+            for m in results[:8]
+        ]
+    finally:
+        await client.close()
 
 
 # ─── SHOWS ───

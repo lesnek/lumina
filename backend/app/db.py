@@ -110,10 +110,14 @@ async def init_db() -> None:
         await db.execute("INSERT OR IGNORE INTO automations (type, name, enabled) VALUES ('renamer', 'Renamer (Media Info)', 0)")
 
         # Migrations for existing DBs
-        try:
-            await db.execute("ALTER TABLE download_tracker ADD COLUMN content_type TEXT DEFAULT 'movie'")
-        except Exception:
-            pass  # column already exists
+        for migration in [
+            "ALTER TABLE download_tracker ADD COLUMN content_type TEXT DEFAULT 'movie'",
+            "ALTER TABLE library_movies ADD COLUMN matched_by TEXT DEFAULT 'filename'",
+        ]:
+            try:
+                await db.execute(migration)
+            except Exception:
+                pass  # column already exists
 
         await db.commit()
 
