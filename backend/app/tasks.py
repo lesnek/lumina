@@ -165,6 +165,39 @@ async def _monitor_loop():
                                 raise ae
                             finally:
                                 await aria2.close()
+
+                        elif backend == "qbittorrent":
+                            qbt = QBittorrentClient(
+                                cfg["qbittorrent_url"],
+                                cfg["qbittorrent_username"],
+                                cfg["qbittorrent_password"],
+                            )
+                            try:
+                                t = await qbt.get_status(did)
+                                state = t.get("state", "")
+                                progress = t.get("progress", 0)
+                                # Completed states or progress == 1.0
+                                if state in ("uploading", "stalledUP", "pausedUP", "forcedUP", "queuedUP", "checkingUP") or progress >= 1.0:
+                                    save_path = t.get("save_path", "") or t.get("content_path", "")
+                                    name = t.get("name", "")
+                                    if save_path and name:
+                                        candidate = os.path.join(save_path, name)
+                                        if os.path.exists(candidate):
+                                            if os.path.isdir(candidate):
+                                                # Find largest video file in folder
+                                                for root_d, _, fnames in os.walk(candidate):
+                                                    for fn in fnames:
+                                                        if os.path.splitext(fn)[1].lower() in ('.mkv', '.mp4', '.avi', '.ts', '.m4v'):
+                                                            fp = os.path.join(root_d, fn)
+                                                            if not completed_path or os.path.getsize(fp) > os.path.getsize(completed_path):
+                                                                completed_path = fp
+                                            else:
+                                                completed_path = candidate
+                                    logger.info("qBittorrent %s complete: state=%s path=%s", did[:8], state, completed_path)
+                            except Exception as qe:
+                                logger.error("qBittorrent check failed for %s: %s", did[:8], qe)
+                            finally:
+                                await qbt.close()
                         
                         if completed_path and Path(completed_path).exists():
                             logger.info("Download completed: %s. Starting post-processing.", title)
