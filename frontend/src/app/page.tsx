@@ -85,12 +85,17 @@ function HomeContent() {
     const qParam = searchParams.get("q");
     const directSearch = searchParams.get("filesearch");
     if (qParam && directSearch) {
-      // Skip TMDB, go straight to file search
-      setSelectedMovie({ tmdb_id: 0, title: qParam, original_title: "", year: "", overview: "", poster_url: null, media_type: "tv" });
+      const origTitle = searchParams.get("original_title") || undefined;
+      const tmdbId = searchParams.get("tmdb_id") ? parseInt(searchParams.get("tmdb_id")!) : undefined;
+      const mediaType = searchParams.get("media_type") || "tv";
+      setSelectedMovie({ tmdb_id: tmdbId || 0, title: qParam, original_title: origTitle || "", year: "", overview: "", poster_url: null, media_type: mediaType as "movie" | "tv" });
       setFiles([]);
       setFilesLoading(true);
       setError(null);
-      searchFiles(qParam).then(setFiles).catch((e) => setError(e instanceof Error ? e.message : "Search error")).finally(() => setFilesLoading(false));
+      searchFiles(qParam, undefined, origTitle, tmdbId, mediaType)
+        .then(setFiles)
+        .catch((e) => setError(e instanceof Error ? e.message : "Search error"))
+        .finally(() => setFilesLoading(false));
       window.history.replaceState({}, "", "/");
     }
   }, [searchParams, ready, handleDiscoverMovie]);

@@ -90,8 +90,18 @@ export default function LibraryPage() {
   }
 
   function handleSearchEpisode(showTitle: string, season: number, episode: number) {
-    const query = `${showTitle} S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
-    router.push(`/?q=${encodeURIComponent(query)}&filesearch=1`);
+    const se = `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
+    const query = `${showTitle} ${se}`;
+    const origTitle = selectedShow?.original_title || "";
+    const tmdbId = selectedShow?.tmdb_id || 0;
+    let url = `/?q=${encodeURIComponent(query)}&filesearch=1`;
+    if (origTitle && origTitle !== showTitle) {
+      url += `&original_title=${encodeURIComponent(origTitle + " " + se)}`;
+    }
+    if (tmdbId) {
+      url += `&tmdb_id=${tmdbId}&media_type=tv`;
+    }
+    router.push(url);
   }
 
   return (
