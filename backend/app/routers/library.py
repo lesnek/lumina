@@ -111,6 +111,73 @@ def _parse_nfo(video_path: str) -> dict | None:
     return None
 
 
+def _parse_nfo_file(nfo_path: str) -> dict | None:
+    """Parse a specific .nfo file and extract TMDB ID + metadata."""
+    try:
+        tree = ET.parse(nfo_path)
+        root = tree.getroot()
+
+        tmdb_id = None
+        tmdb_el = root.find("tmdbid")
+        if tmdb_el is not None and tmdb_el.text:
+            tmdb_id = int(tmdb_el.text)
+        else:
+            for uid in root.findall("uniqueid"):
+                if uid.get("type", "").lower() == "tmdb" and uid.text:
+                    tmdb_id = int(uid.text)
+                    break
+
+        if not tmdb_id:
+            return None
+
+        return {
+            "tmdb_id": tmdb_id,
+            "title": (root.findtext("title") or "").strip(),
+            "original_title": (root.findtext("originaltitle") or "").strip(),
+            "year": (root.findtext("year") or "").strip(),
+        }
+    except Exception:
+        return None
+
+
+def _parse_episode_nfo(video_path: str) -> dict | None:
+    """Parse episode .nfo file next to video for season/episode/show info."""
+    base = os.path.splitext(video_path)[0]
+    nfo_path = f"{base}.nfo"
+    if not os.path.isfile(nfo_path):
+        return None
+    try:
+        tree = ET.parse(nfo_path)
+        root = tree.getroot()
+        if root.tag.lower() != "episodedetails":
+            return None
+
+        season = root.findtext("season")
+        episode = root.findtext("episode")
+        if not season or not episode:
+            return None
+
+        # Try to get show TMDB ID from uniqueid
+        show_tmdb_id = None
+        for uid in root.findall("uniqueid"):
+            if uid.get("type", "").lower() == "tmdb" and uid.text:
+                # Episode NFO might have episode tmdb_id, not show tmdb_id
+                # Show tmdb_id is in tvshow.nfo — we'll use it as hint
+                pass
+
+        show_name = (root.findtext("showtitle") or "").strip()
+
+        return {
+            "season": int(season),
+            "episode": int(episode),
+            "show_name": show_name,
+            "show_tmdb_id": show_tmdb_id,
+            "year": (root.findtext("year") or "").strip() or None,
+        }
+    except Exception:
+        return None
+
+
 def _scan_video_files(directory: str) -> list[dict]:
     """Walk directory and return list of video files with metadata."""
     files = []
@@ -266,25 +333,43 @@ async def scan_library():
         if tv_dir:
             tv_files = _scan_video_files(tv_dir)
 
-            # Group by show name
+            # Group by show name — try episode NFO first for season/episode info
             show_groups: dict[str, list[dict]] = {}
             for f in tv_files:
+                # Try episode .nfo for accurate S/E numbers
+                ep_nfo = _parse_episode_nfo(f["file_path"])
                 parsed = parse_tv_filename(f["filename"], f["file_path"])
-                if not parsed:
+
+                if ep_nfo:
+                    # NFO has season/episode — merge with parsed or create new
+                    show_name = ep_nfo.get("show_name") or (parsed["show_name"] if parsed else "")
+                    if not show_name:
+                        continue
+                    entry = {
+                        **f,
+                        "show_name": show_name,
+                        "season": ep_nfo["season"],
+                        "episode": ep_nfo["episode"],
+                        "year": ep_nfo.get("year") or (parsed.get("year") if parsed else None),
+                        "nfo_show_tmdb_id": ep_nfo.get("show_tmdb_id"),
+                    }
+                elif parsed:
+                    entry = {**f, **parsed}
+                else:
                     continue
-                key = normalize_for_search(parsed["show_name"])
+
+                key = normalize_for_search(entry["show_name"])
                 if key not in show_groups:
                     show_groups[key] = []
-                show_groups[key].append({**f, **parsed})
+                show_groups[key].append(entry)
 
             stats["shows_found"] = len(show_groups)
 
             for show_key, episodes in show_groups.items():
-                # Use first episode's show_name for TMDB search
                 show_name = episodes[0]["show_name"]
                 year = episodes[0].get("year")
 
-                # Check if already in DB by searching existing shows
+                # Check if already in DB
                 cursor = await db.execute(
                     "SELECT tmdb_id FROM library_shows WHERE lower(title) = lower(?) OR lower(original_title) = lower(?)",
                     (show_name, show_name),
@@ -294,16 +379,57 @@ async def scan_library():
                 if existing:
                     tmdb_id = existing[0]
                 else:
-                    # Search TMDB for the show
-                    search_q = f"{show_name} {year}" if year else show_name
-                    try:
-                        results = await client.search_tv(search_q)
-                        if not results:
-                            logger.warning("No TMDB match for show '%s'", show_name)
-                            continue
-                        tmdb_id = results[0].tmdb_id
+                    tmdb_id = None
 
-                        # Get full details
+                    # 1. Try nfo_show_tmdb_id from episode NFO
+                    for ep in episodes:
+                        if ep.get("nfo_show_tmdb_id"):
+                            tmdb_id = ep["nfo_show_tmdb_id"]
+                            logger.info("Show '%s' matched via episode NFO: tmdb=%d", show_name, tmdb_id)
+                            break
+
+                    # 2. Try tvshow.nfo from show folder
+                    if not tmdb_id:
+                        # Find show root folder from episode paths
+                        for ep in episodes:
+                            ep_path = ep.get("file_path", "")
+                            # Walk up from episode to find tvshow.nfo
+                            d = os.path.dirname(ep_path)
+                            for _ in range(3):  # max 3 levels up
+                                nfo_path = os.path.join(d, "tvshow.nfo")
+                                if os.path.isfile(nfo_path):
+                                    nfo = _parse_nfo_file(nfo_path)
+                                    if nfo and nfo.get("tmdb_id"):
+                                        tmdb_id = nfo["tmdb_id"]
+                                        logger.info("Show '%s' matched via NFO: tmdb=%d", show_name, tmdb_id)
+                                        break
+                                parent = os.path.dirname(d)
+                                if parent == d:
+                                    break
+                                d = parent
+                            if tmdb_id:
+                                break
+
+                    # 3. Fallback: TMDB search
+                    if not tmdb_id:
+                        search_q = f"{show_name} {year}" if year else show_name
+                        try:
+                            results = await client.search_tv(search_q)
+                            if not results:
+                                # Try without diacritics
+                                stripped = normalize_for_search(show_name)
+                                if stripped != show_name.lower():
+                                    results = await client.search_tv(stripped)
+                            if not results:
+                                logger.warning("No TMDB match for show '%s'", show_name)
+                                continue
+                            tmdb_id = results[0].tmdb_id
+                        except Exception as e:
+                            logger.warning("TMDB search failed for show '%s': %s", show_name, e)
+                            continue
+
+                    # Fetch full details and populate episodes
+                    try:
                         details = await client.get_tv_details(tmdb_id)
                         await db.execute(
                             """INSERT OR REPLACE INTO library_shows
@@ -316,7 +442,6 @@ async def scan_library():
                              details["total_seasons"], details["total_episodes"]),
                         )
 
-                        # Populate all episodes from TMDB
                         for season_info in details["seasons"]:
                             sn = season_info["season_number"]
                             try:
@@ -331,9 +456,8 @@ async def scan_library():
                                     )
                             except Exception as e:
                                 logger.warning("Failed to fetch S%02d for %s: %s", sn, show_name, e)
-
                     except Exception as e:
-                        logger.warning("TMDB match failed for show '%s': %s", show_name, e)
+                        logger.warning("TMDB details failed for show '%s': %s", show_name, e)
                         continue
 
                 # Mark episodes we have on disk
