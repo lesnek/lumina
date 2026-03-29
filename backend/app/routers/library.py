@@ -115,10 +115,26 @@ async def scan_library():
                 if not parsed:
                     continue
 
-                # Search TMDB
-                search_q = f"{parsed['title']} {parsed['year']}" if parsed.get("year") else parsed["title"]
+                # Search TMDB — try multiple queries
+                title = parsed["title"]
+                year = parsed.get("year")
+                queries = []
+                if year:
+                    queries.append(f"{title} {year}")
+                queries.append(title)
+                # Also try without diacritics
+                stripped = normalize_for_search(title)
+                if stripped != title.lower():
+                    if year:
+                        queries.append(f"{stripped} {year}")
+                    queries.append(stripped)
+
                 try:
-                    results = await client.search_movie(search_q)
+                    results = None
+                    for search_q in queries:
+                        results = await client.search_movie(search_q)
+                        if results:
+                            break
                     if results:
                         movie = results[0]
                         await db.execute(

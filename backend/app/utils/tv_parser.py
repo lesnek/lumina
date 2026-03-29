@@ -162,7 +162,11 @@ def parse_movie_filename(filename: str) -> dict | None:
     # Remove quality tags and release groups
     name = _QUALITY_TAGS.sub("", name)
     name = _RELEASE_GROUP.sub("", name)
+    # Remove anything in parentheses (actors, alt titles, etc.)
+    name = re.sub(r"\([^)]*\)", "", name)
     name = re.sub(r"\s*[-–—]\s*$", "", name)
+    # Remove trailing/leading punctuation
+    name = re.sub(r"[,;:]+$", "", name)
     name = re.sub(r"\s+", " ", name).strip()
 
     if not name:

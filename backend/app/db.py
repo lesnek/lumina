@@ -108,6 +108,13 @@ async def init_db() -> None:
         await db.execute("INSERT OR IGNORE INTO automations (type, name, enabled) VALUES ('radarr', 'Radarr', 0)")
         await db.execute("INSERT OR IGNORE INTO automations (type, name, enabled) VALUES ('sonarr', 'Sonarr', 0)")
         await db.execute("INSERT OR IGNORE INTO automations (type, name, enabled) VALUES ('renamer', 'Renamer (Media Info)', 0)")
+
+        # Migrations for existing DBs
+        try:
+            await db.execute("ALTER TABLE download_tracker ADD COLUMN content_type TEXT DEFAULT 'movie'")
+        except Exception:
+            pass  # column already exists
+
         await db.commit()
 
         # Auto-migrate from .env if tables are empty
