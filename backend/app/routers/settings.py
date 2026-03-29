@@ -12,6 +12,7 @@ SENSITIVE_KEYS = {"tmdb_api_key", "groq_api_key", "aria2_rpc_secret", "qbittorre
 DEFAULTS = {
     "tmdb_api_key": "",
     "groq_api_key": "",
+    "groq_model": "llama-3.3-70b-versatile",
     "aria2_rpc_url": "http://aria2:6800/jsonrpc",
     "aria2_rpc_secret": "your_aria2_secret",
     "plex_media_dir": "/downloads/plex",
